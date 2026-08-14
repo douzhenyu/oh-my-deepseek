@@ -32,6 +32,10 @@ interface SettingsDocument {
 
 const APP_URL = process.env.DEEPSEEK_URL || 'http://127.0.0.1:3080';
 
+// Pin our data dir to a stable name regardless of how the app name resolves
+// (productName renames must not orphan the user's data / backend install).
+app.setPath('userData', path.join(app.getPath('appData'), 'oh-my-deepseek'));
+
 // --- Performance tuning ---
 // Profiling (CDP tracing) showed the harness GUI is allocation-heavy
 // (trajectory tables, plugin inventory, long message lists): the renderer
@@ -57,10 +61,18 @@ let quitInProgress = false;
 // ---------------------------------------------------------------------------
 
 // Exact dsh entry on this machine (npx cache). Harness updates can change
-// this path; resolveBackendCommand() also scans for newer npx copies and
-// falls back to PATH / DEEPSEEK_BACKEND_CMD.
+// this path; resolveBackendCommand() also scans for newer npx copies, the
+// client-managed install dir, and auto-installs on first run for fresh users.
 const KNOWN_DSH_BIN =
   '/Users/dou/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh/lib/bin.js';
+
+function harnessDir(): string {
+  return path.join(app.getPath('userData'), 'harness');
+}
+
+function clientManagedBin(): string {
+  return path.join(harnessDir(), 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
+}
 
 function isLocalUrl(url: string): boolean {
   try {
@@ -115,7 +127,7 @@ function findNodePath(): string | null {
   return candidates.find((p) => fs.existsSync(p)) ?? null;
 }
 
-function resolveBackendCommand(): BackendCommand {
+function resolveBackendCommand(): BackendCommand | null {
   // 1) explicit override: DEEPSEEK_BACKEND_CMD="node /path/to/dsh --port 3080"
   if (process.env.DEEPSEEK_BACKEND_CMD) return parseCommand(process.env.DEEPSEEK_BACKEND_CMD);
   // 2) known absolute path from this machine (use an absolute node binary)
@@ -132,10 +144,59 @@ function resolveBackendCommand(): BackendCommand {
       if (hits.length > 0) return { cmd: findNodePath() ?? 'node', args: [hits[0] as string] };
     }
   } catch {
-    /* fall through to PATH */
+    /* fall through */
   }
-  // 4) resolve 'dsh' via PATH (works if globally installed)
-  return { cmd: 'dsh', args: [] };
+  // 4) client-managed install dir (auto-installed on first run)
+  const managed = clientManagedBin();
+  if (fs.existsSync(managed)) return { cmd: findNodePath() ?? 'node', args: [managed] };
+  return null; // not installed anywhere -> caller triggers auto-install
+}
+
+/**
+ * Locate npm's CLI script. We spawn `node <npm-cli.js>` instead of `npm`
+ * because npm's shebang is `#!/usr/bin/env node` — env can't find node in the
+ * minimal PATH that GUI-launched apps (and this harness's own shell) get.
+ */
+function findNpmCli(): string | null {
+  for (const p of ['/opt/homebrew/bin/npm', '/usr/local/bin/npm', '/opt/local/bin/npm']) {
+    try {
+      const real = fs.realpathSync(p); // e.g. .../lib/node_modules/npm/bin/npm-cli.js
+      if (real.endsWith('.js')) return real;
+    } catch {
+      /* try next */
+    }
+  }
+  for (const p of [
+    '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js',
+    '/usr/local/lib/node_modules/npm/bin/npm-cli.js',
+  ]) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+/** First-run auto-install: `npm install @deepseek-ai/dsh` into our own data dir. */
+async function installHarness(): Promise<boolean> {
+  const node = findNodePath();
+  const npmCli = findNpmCli();
+  if (!node || !npmCli) return false;
+  const dir = harnessDir();
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    return false;
+  }
+  console.error('[harness] first run: installing @deepseek-ai/dsh …');
+  return new Promise((resolve) => {
+    const child = spawn(
+      node,
+      [npmCli, 'install', '@deepseek-ai/dsh', '--prefix', dir, '--no-audit', '--no-fund', '--no-progress'],
+      { stdio: ['ignore', 'ignore', 'pipe'], env: process.env }
+    );
+    child.stderr?.on('data', (d: Buffer) => console.error('[harness-install]', String(d).trimEnd()));
+    child.on('error', () => resolve(false));
+    child.on('exit', (code) => resolve(code === 0));
+  });
 }
 
 function portOpen(port: string): Promise<boolean> {
@@ -222,7 +283,25 @@ async function ensureBackendOnce(): Promise<BackendResult> {
     };
   }
 
-  const bc = resolveBackendCommand();
+  let bc = resolveBackendCommand();
+  if (!bc) {
+    // First run for a fresh user: auto-install the harness into our data dir.
+    console.error('[backend] dsh not found; attempting first-run auto-install…');
+    const installed = await installHarness();
+    if (!installed) {
+      return {
+        ok: false,
+        spawned: false,
+        reason:
+          '未找到 DeepSeek Harness，且自动安装失败（需要联网与 Node.js）。' +
+          '可手动执行 npm install -g @deepseek-ai/dsh 后重试。',
+      };
+    }
+    bc = resolveBackendCommand();
+    if (!bc) {
+      return { ok: false, spawned: false, reason: '自动安装完成但未找到 dsh，请手动安装 @deepseek-ai/dsh。' };
+    }
+  }
   try {
     // Capture the spawned backend's stderr into a log file (and the app's
     // stderr) so startup failures are diagnosable instead of invisible.
@@ -295,7 +374,7 @@ function createWindow(): void {
     height: 860,
     minWidth: 820,
     minHeight: 560,
-    title: 'DeepSeek Harness',
+    title: 'Oh My DeepSeek',
     backgroundColor: '#0f1115',
     show: false,
     webPreferences: {
@@ -311,13 +390,11 @@ function createWindow(): void {
 
   mainWindow.once('ready-to-show', () => mainWindow?.show());
 
-  // Show only the base app name in the title bar. The page sets
-  // document.title to "<会话名> — DeepSeek Harness"; strip the prefix so the
-  // title bar reads just "DeepSeek Harness" (adapts if the base name changes).
-  mainWindow.on('page-title-updated', (event, title) => {
+  // Keep a clean, fixed window title (the page sets document.title to
+  // "<会话名> — DeepSeek Harness"; we always show the client's own name).
+  mainWindow.on('page-title-updated', (event) => {
     event.preventDefault();
-    const base = String(title).split(' — ').pop()?.trim();
-    mainWindow?.setTitle(base || 'DeepSeek Harness');
+    mainWindow?.setTitle('Oh My DeepSeek');
   });
 
   // Open external links in the default browser; keep internal navigation in-app.
@@ -458,11 +535,11 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(() => {
-    app.setName('DeepSeek');
+    app.setName('Oh My DeepSeek');
     app.setAboutPanelOptions({
-      applicationName: 'DeepSeek',
+      applicationName: 'Oh My DeepSeek',
       applicationVersion: app.getVersion(),
-      copyright: 'Desktop client for the local DeepSeek Harness',
+      copyright: 'macOS desktop client for the local DeepSeek Harness',
     });
     ipcMain.on('theme-changed', (_event, theme: unknown) => {
       if (theme === 'dark' || theme === 'light' || theme === 'system') applyTheme(theme);

@@ -16,7 +16,7 @@ DeepSeek Harness 的 macOS 桌面客户端 —— 把本地运行的 [DeepSeek H
 - **自动重连**：后端未启动时每 3 秒自动重连，先开后端后开 App 也能自动连上
 - **外链安全**：搜索结果、引用等外部链接自动用系统默认浏览器打开
 - **单实例运行**：重复打开只聚焦已有窗口
-- **干净标题栏**：只显示 `DeepSeek Harness`，不带会话名前缀
+- **干净标题栏**：固定显示 `Oh My DeepSeek`，不带会话名前缀
 - **自绘 App 图标**：纯 Node 脚本生成（深蓝渐变 + 火花点），无第三方依赖
 
 ## 🚀 快速开始
@@ -31,7 +31,7 @@ cd oh-my-deepseek
 npm install
 npm run generate-icon   # 生成 App 图标（build/icon.icns）
 npm run dist            # 打包 .app/.dmg 到 dist/
-open dist/mac-arm64/DeepSeek.app
+open dist/mac-arm64/Oh\ My\ DeepSeek.app
 ```
 
 ### 后端自动启动
@@ -63,21 +63,21 @@ npm start               # 直接以开发模式加载 http://127.0.0.1:3080
 右键 App →「打开」，或执行：
 
 ```bash
-xattr -dr com.apple.quarantine /path/to/DeepSeek.app
+xattr -dr com.apple.quarantine /path/to/Oh\ My\ DeepSeek.app
 ```
 
 ## 🧰 打包与发布
 
 ```bash
 npm run generate-icon   # 生成图标（首次或改图标后）
-npm run pack            # 仅打包 .app（dist/mac-arm64/DeepSeek.app）
+npm run pack            # 仅打包 .app（dist/mac-arm64/Oh My DeepSeek.app）
 npm run dist            # 打包 .app + .dmg + .zip
 ```
 
 产物：
 
-- `dist/mac-arm64/DeepSeek.app`
-- `dist/DeepSeek-1.2.0-arm64.dmg`
+- `dist/mac-arm64/Oh My DeepSeek.app`
+- `dist/Oh My DeepSeek-1.3.0-arm64.dmg`
 
 > 本机自用无需签名；若需对外发布，请配置 Apple Developer 签名与公证后移除 `package.json` 中 `build.mac.identity: null`。
 

@@ -46,6 +46,7 @@ let mainWindow: BrowserWindow | null = null;
 let retryTimer: NodeJS.Timeout | null = null;
 let backendChild: ChildProcess | null = null; // backend process spawned BY US (killed on quit)
 let bootPromise: Promise<void> | null = null;
+let quitInProgress = false;
 
 // ---------------------------------------------------------------------------
 // Backend auto-start: when the user launches the client and no DeepSeek
@@ -153,6 +154,18 @@ function waitForBackend(
 }
 
 async function ensureBackend(): Promise<BackendResult> {
+  // Spawn may race a dying backend process (e.g. the user's previous backend
+  // still releasing the port): retry the whole check+spawn once.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const r = await ensureBackendOnce();
+    if (r.ok || attempt === 2) return r;
+    console.error(`[backend] attempt ${attempt} failed (${r.reason}); retrying…`);
+    await new Promise((res) => setTimeout(res, 1500));
+  }
+  return { ok: false, spawned: false, reason: '启动后端失败' };
+}
+
+async function ensureBackendOnce(): Promise<BackendResult> {
   let url: URL;
   try {
     url = new URL(APP_URL);
@@ -452,17 +465,37 @@ if (!gotSingleInstanceLock) {
     });
   });
 
-  // Full quit (Cmd+Q): stop the backend we spawned. Backends the user
-  // started manually (spawned === false) are left untouched.
-  app.on('will-quit', () => {
-    if (backendChild?.pid) {
+  // Full quit (Cmd+Q): stop the backend we spawned — gracefully, so the
+  // harness gets to flush its session logs (killing it hard can tear a
+  // Zstandard session-log record and corrupt session history). SIGINT first
+  // (dsh runs a graceful dispose), escalate to SIGKILL only if it hangs.
+  // Backends the user started manually (spawned === false) are untouched.
+  app.on('before-quit', (event) => {
+    const child = backendChild;
+    if (quitInProgress || !child?.pid) return;
+    const childPid: number = child.pid;
+    event.preventDefault();
+    quitInProgress = true;
+    backendChild = null;
+    console.error(`[backend] graceful shutdown: SIGINT -> pid ${childPid}`);
+    try {
+      process.kill(-childPid, 'SIGINT');
+    } catch {
+      /* already gone */
+    }
+    const killTimer = setTimeout(() => {
       try {
-        process.kill(-backendChild.pid, 'SIGTERM');
+        process.kill(-childPid, 'SIGKILL');
       } catch {
         /* already gone */
       }
-      backendChild = null;
-    }
+    }, 8000);
+    const resume = () => {
+      clearTimeout(killTimer);
+      app.quit();
+    };
+    if (child.exitCode !== null || child.signalCode !== null) resume();
+    else child.once('exit', resume);
   });
 
   app.on('window-all-closed', () => {

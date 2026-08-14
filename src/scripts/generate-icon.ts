@@ -1,31 +1,37 @@
-'use strict';
-
-const fs = require('fs');
-const path = require('path');
-const zlib = require('zlib');
+import fs from 'fs';
+import path from 'path';
+import zlib from 'zlib';
 
 const SIZE = 1024;
 const SS = 3; // supersampling samples per axis
 
+type RGB = [number, number, number];
+
 // ---- tiny color math ----
-function clamp(x, a, b) {
+function clamp(x: number, a: number, b: number): number {
   return x < a ? a : x > b ? b : x;
 }
-function lerp(a, b, t) {
+function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
-function smoothstep(e0, e1, x) {
+function smoothstep(e0: number, e1: number, x: number): number {
   const t = clamp((x - e0) / (e1 - e0), 0, 1);
   return t * t * (3 - 2 * t);
 }
 
-function sdCircle(px, py, cx, cy, r) {
-  const dx = px - cx;
-  const dy = py - cy;
-  return Math.hypot(dx, dy) - r;
+function sdCircle(px: number, py: number, cx: number, cy: number, r: number): number {
+  return Math.hypot(px - cx, py - cy) - r;
 }
 
-function sdRoundRect(px, py, cx, cy, hx, hy, r) {
+function sdRoundRect(
+  px: number,
+  py: number,
+  cx: number,
+  cy: number,
+  hx: number,
+  hy: number,
+  r: number
+): number {
   const qx = Math.abs(px - cx) - (hx - r);
   const qy = Math.abs(py - cy) - (hy - r);
   const ox = Math.max(qx, 0);
@@ -33,14 +39,14 @@ function sdRoundRect(px, py, cx, cy, hx, hy, r) {
   return Math.hypot(ox, oy) + Math.min(Math.max(qx, qy), 0) - r;
 }
 
-const bgTop = [15, 18, 40];
-const bgBot = [26, 24, 74];
-const tileTop = [86, 132, 255];
-const tileBot = [124, 92, 255];
+const bgTop: RGB = [15, 18, 40];
+const bgBot: RGB = [26, 24, 74];
+const tileTop: RGB = [86, 132, 255];
+const tileBot: RGB = [124, 92, 255];
 
 const AA = 1.5 / SIZE;
 
-function sample(u, v) {
+function sample(u: number, v: number): RGB {
   // vertical gradient background
   let r = lerp(bgTop[0], bgBot[0], v);
   let g = lerp(bgTop[1], bgBot[1], v);
@@ -79,7 +85,7 @@ function sample(u, v) {
 }
 
 const rgba = Buffer.alloc(SIZE * SIZE * 4);
-const ssOffsets = [];
+const ssOffsets: Array<[number, number]> = [];
 for (let i = 0; i < SS; i++) {
   for (let j = 0; j < SS; j++) {
     ssOffsets.push([(i + 0.5) / SS, (j + 0.5) / SS]);
@@ -107,8 +113,8 @@ for (let y = 0; y < SIZE; y++) {
 }
 
 // ---- PNG encoding ----
-let crcTable = null;
-function crc32(buf) {
+let crcTable: Int32Array | null = null;
+function crc32(buf: Buffer): number {
   if (!crcTable) {
     crcTable = new Int32Array(256);
     for (let n = 0; n < 256; n++) {
@@ -119,12 +125,12 @@ function crc32(buf) {
   }
   let crc = 0xffffffff;
   for (let i = 0; i < buf.length; i++) {
-    crc = crcTable[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
+    crc = (crcTable as Int32Array)[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
   }
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-function chunk(type, data) {
+function chunk(type: string, data: Buffer): Buffer {
   const len = Buffer.alloc(4);
   len.writeUInt32BE(data.length, 0);
   const typeBuf = Buffer.from(type, 'ascii');
@@ -133,7 +139,7 @@ function chunk(type, data) {
   return Buffer.concat([len, typeBuf, data, crc]);
 }
 
-function encodePNG(w, h, pixels) {
+function encodePNG(w: number, h: number, pixels: Buffer): Buffer {
   const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(w, 0);
@@ -147,15 +153,20 @@ function encodePNG(w, h, pixels) {
     pixels.copy(raw, y * (stride + 1) + 1, y * stride, (y + 1) * stride);
   }
   const idat = zlib.deflateSync(raw, { level: 9 });
-  return Buffer.concat([
-    sig,
-    chunk('IHDR', ihdr),
-    chunk('IDAT', idat),
-    chunk('IEND', Buffer.alloc(0)),
-  ]);
+  return Buffer.concat([sig, chunk('IHDR', ihdr), chunk('IDAT', idat), chunk('IEND', Buffer.alloc(0))]);
 }
 
-const outDir = path.join(__dirname, '..', 'build');
+function findProjectRoot(start: string): string {
+  let dir = start;
+  for (;;) {
+    if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) throw new Error('project root not found');
+    dir = parent;
+  }
+}
+
+const outDir = path.join(findProjectRoot(__dirname), 'build');
 fs.mkdirSync(outDir, { recursive: true });
 const outPath = path.join(outDir, 'icon_1024.png');
 fs.writeFileSync(outPath, encodePNG(SIZE, SIZE, rgba));

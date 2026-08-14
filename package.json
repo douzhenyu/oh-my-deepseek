@@ -1,8 +1,8 @@
 {
   "name": "oh-my-deepseek",
-  "version": "1.1.0",
-  "description": "macOS desktop client for the local DeepSeek Harness (Electron)",
-  "main": "main.js",
+  "version": "1.2.0",
+  "description": "macOS desktop client for the local DeepSeek Harness (Electron + TypeScript)",
+  "main": "out/main.js",
   "author": "douzhenyu",
   "license": "MIT",
   "repository": {
@@ -11,15 +11,18 @@
   },
   "homepage": "https://github.com/douzhenyu/oh-my-deepseek",
   "scripts": {
-    "start": "electron .",
-    "generate-icon": "node scripts/generate-icon.js && bash scripts/make-icns.sh",
-    "check-compat": "node scripts/check-harness-compat.js",
-    "pack": "electron-builder --mac dir",
-    "dist": "electron-builder --mac"
+    "build": "tsc",
+    "start": "npm run build && electron .",
+    "generate-icon": "npm run build && node out/scripts/generate-icon.js && bash scripts/make-icns.sh",
+    "check-compat": "npm run build && node out/scripts/check-harness-compat.js",
+    "pack": "npm run build && electron-builder --mac dir",
+    "dist": "npm run build && electron-builder --mac"
   },
   "devDependencies": {
+    "@types/node": "^22.20.1",
     "electron": "^43.4.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.9.3"
   },
   "build": {
     "appId": "com.dou.deepseek-desktop",
@@ -29,8 +32,7 @@
       "buildResources": "build"
     },
     "files": [
-      "main.js",
-      "preload.js",
+      "out/**",
       "loading.html",
       "package.json"
     ],

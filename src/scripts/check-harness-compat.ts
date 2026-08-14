@@ -1,6 +1,3 @@
-#!/usr/bin/env node
-'use strict';
-
 /**
  * DeepSeek Harness 上游兼容性自检
  *
@@ -10,9 +7,9 @@
  *   3. Settings API: POST /api/settings.describe with an RPC envelope,
  *      ui-theme namespace carrying a `preference` of dark|light|system
  *
- * Run this after every harness upgrade: node scripts/check-harness-compat.js
- * (or npm run check-compat). Each FAIL/WARN line tells you exactly which part
- * of preload.js / main.js needs updating.
+ * Run this after every harness upgrade: npm run check-compat.
+ * Each FAIL/WARN line tells you exactly which part of src/main.ts /
+ * src/preload.ts needs updating.
  */
 
 const BASE = (process.env.DEEPSEEK_URL || 'http://127.0.0.1:3080').replace(/\/+$/, '');
@@ -20,7 +17,7 @@ const BASE = (process.env.DEEPSEEK_URL || 'http://127.0.0.1:3080').replace(/\/+$
 let failed = 0;
 let warned = 0;
 
-function report(ok, name, detail, hint) {
+function report(ok: boolean, name: string, detail?: string, hint?: string): void {
   const tag = ok ? 'PASS' : hint === 'WARN' ? 'WARN' : 'FAIL';
   if (!ok) {
     if (hint === 'WARN') warned++;
@@ -30,7 +27,17 @@ function report(ok, name, detail, hint) {
   if (!ok && hint && hint !== 'WARN') console.log(`        fix: ${hint}`);
 }
 
-async function main() {
+interface SettingsNamespace {
+  ns?: string;
+  value?: { preference?: unknown };
+  user?: { preference?: unknown };
+}
+
+interface SettingsDocument {
+  result?: { value?: { namespaces?: SettingsNamespace[] } };
+}
+
+async function main(): Promise<void> {
   console.log(`Checking harness contract at ${BASE}\n`);
 
   // 1) Reachability + harness revision
@@ -41,7 +48,7 @@ async function main() {
     const m = html.match(/window\.__DSH_BOOT__\s*=\s*\{[^}]*"rev"\s*:\s*"([^"]+)"/);
     report(true, 'Web GUI reachable', `${res.status}${m ? `, harness rev=${m[1]}` : ''}`);
   } catch (e) {
-    report(false, 'Web GUI reachable', e.message, 'Is the harness running at ' + BASE + '?');
+    report(false, 'Web GUI reachable', (e as Error).message, 'Is the harness running at ' + BASE + '?');
     process.exitCode = 1;
     return;
   }
@@ -51,13 +58,13 @@ async function main() {
     html.includes('data-ds-dark-theme'),
     'Theme DOM signal: data-ds-dark-theme',
     html.includes('data-ds-dark-theme') ? 'present in boot script' : 'MISSING',
-    'Update the DARK_ATTRIBUTE in preload.js to the new attribute/class name.'
+    'Update DARK_ATTRIBUTE in src/preload.ts to the new attribute/class name.'
   );
   report(
     /colorScheme\s*=\s*(dark|light)/.test(html),
     'Theme DOM signal: documentElement.style.colorScheme',
     'present in boot script',
-    'Update readTheme() in preload.js to the new scheme mechanism.'
+    'Update readTheme() in src/preload.ts to the new scheme mechanism.'
   );
 
   // 3) Settings API envelope + ui-theme preference
@@ -73,26 +80,26 @@ async function main() {
       }),
     });
     const okEnvelope = res.ok;
-    let pref = null;
+    let pref: unknown = null;
     let nsFound = false;
     if (okEnvelope) {
-      const data = await res.json();
-      const namespaces = (data && data.result && data.result.value && data.result.value.namespaces) || [];
-      const ns = namespaces.find((n) => n && n.ns === 'ui-theme');
+      const data = (await res.json()) as SettingsDocument;
+      const namespaces = data?.result?.value?.namespaces ?? [];
+      const ns = namespaces.find((n) => n.ns === 'ui-theme');
       nsFound = !!ns;
       if (ns) {
-        pref = (ns.value && ns.value.preference) || (ns.user && ns.user.preference);
+        pref = ns.value?.preference ?? ns.user?.preference;
       }
     }
     report(okEnvelope, 'Settings API: envelope accepted', okEnvelope ? 'settings.describe ok' : 'HTTP ' + res.status,
-      'Update the envelope shape in main.js (ipcMain.handle "theme-preference").');
+      'Update the envelope shape in src/main.ts (ipcMain.handle "theme-preference").');
     report(nsFound, 'Settings API: ui-theme namespace', nsFound ? 'found' : 'MISSING',
-      'Update the namespace lookup in main.js to the new namespace id.');
+      'Update the namespace lookup in src/main.ts to the new namespace id.');
     report(pref === 'dark' || pref === 'light' || pref === 'system',
       'Settings API: preference field', pref ? `value=${pref}` : 'MISSING',
-      'Update the field path in main.js (ui-theme.preference).');
+      'Update the field path in src/main.ts (ui-theme.preference).');
   } catch (e) {
-    report(false, 'Settings API', e.message, 'Update main.js (ipcMain.handle "theme-preference").');
+    report(false, 'Settings API', (e as Error).message, 'Update src/main.ts (ipcMain.handle "theme-preference").');
   }
 
   console.log(`\n${failed === 0 ? '✓ All checks passed.' : `✗ ${failed} check(s) failed.`}${warned ? ` (${warned} warn)` : ''}`);
@@ -100,6 +107,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error('script error:', e.message);
+  console.error('script error:', (e as Error).message);
   process.exitCode = 1;
 });

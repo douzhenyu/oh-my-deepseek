@@ -1,12 +1,34 @@
-'use strict';
+import { app, BrowserWindow, Menu, shell, ipcMain, nativeTheme } from 'electron';
+import type { MenuItemConstructorOptions } from 'electron';
+import { randomUUID } from 'crypto';
+import { spawn, ChildProcess } from 'child_process';
+import fs from 'fs';
+import net from 'net';
+import os from 'os';
+import path from 'path';
 
-const { app, BrowserWindow, Menu, shell, ipcMain, nativeTheme } = require('electron');
-const { randomUUID } = require('crypto');
-const { spawn } = require('child_process');
-const fs = require('fs');
-const net = require('net');
-const os = require('os');
-const path = require('path');
+type ThemeMode = 'dark' | 'light' | 'system';
+
+interface BackendResult {
+  ok: boolean;
+  spawned: boolean;
+  reason?: string;
+}
+
+interface BackendCommand {
+  cmd: string;
+  args: string[];
+}
+
+interface SettingsNamespace {
+  ns?: string;
+  value?: { preference?: unknown };
+  user?: { preference?: unknown };
+}
+
+interface SettingsDocument {
+  result?: { value?: { namespaces?: SettingsNamespace[] } };
+}
 
 const APP_URL = process.env.DEEPSEEK_URL || 'http://127.0.0.1:3080';
 
@@ -20,10 +42,10 @@ const APP_URL = process.env.DEEPSEEK_URL || 'http://127.0.0.1:3080';
 // a larger young generation reduces scavenge churn.
 app.commandLine.appendSwitch('js-flags', '--no-compact --max-semi-space-size=64');
 
-let mainWindow = null;
-let retryTimer = null;
-let backendChild = null; // backend process spawned BY US (killed on quit)
-let bootPromise = null;
+let mainWindow: BrowserWindow | null = null;
+let retryTimer: NodeJS.Timeout | null = null;
+let backendChild: ChildProcess | null = null; // backend process spawned BY US (killed on quit)
+let bootPromise: Promise<void> | null = null;
 
 // ---------------------------------------------------------------------------
 // Backend auto-start: when the user launches the client and no DeepSeek
@@ -39,21 +61,21 @@ let bootPromise = null;
 const KNOWN_DSH_BIN =
   '/Users/dou/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh/lib/bin.js';
 
-function isLocalUrl(url) {
+function isLocalUrl(url: string): boolean {
   try {
-    const h = new URL(url).hostname;
-    return h === '127.0.0.1' || h === 'localhost' || h === '::1';
-  } catch (e) {
+    const host = new URL(url).hostname;
+    return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+  } catch {
     return false;
   }
 }
 
-function parseCommand(s) {
+function parseCommand(s: string): BackendCommand {
   const parts = (s.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((p) => p.replace(/^["']|["']$/g, ''));
-  return { cmd: parts[0], args: parts.slice(1) };
+  return { cmd: parts[0] ?? '', args: parts.slice(1) };
 }
 
-function resolveBackendCommand() {
+function resolveBackendCommand(): BackendCommand {
   // 1) explicit override: DEEPSEEK_BACKEND_CMD="node /path/to/dsh --port 3080"
   if (process.env.DEEPSEEK_BACKEND_CMD) return parseCommand(process.env.DEEPSEEK_BACKEND_CMD);
   // 2) known absolute path from this machine
@@ -64,17 +86,19 @@ function resolveBackendCommand() {
     if (fs.existsSync(npxRoot)) {
       const hits = fs
         .readdirSync(npxRoot)
-        .map((d) => path.join(npxRoot, d, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'))
+        .map((dir) => path.join(npxRoot, dir, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'))
         .filter((p) => fs.existsSync(p))
         .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-      if (hits.length > 0) return { cmd: 'node', args: [hits[0]] };
+      if (hits.length > 0) return { cmd: 'node', args: [hits[0] as string] };
     }
-  } catch (e) {}
+  } catch {
+    /* fall through to PATH */
+  }
   // 4) resolve 'dsh' via PATH (works if globally installed)
   return { cmd: 'dsh', args: [] };
 }
 
-function portOpen(port) {
+function portOpen(port: string): Promise<boolean> {
   return new Promise((resolve) => {
     const sock = net.connect(Number(port), '127.0.0.1', () => {
       sock.destroy();
@@ -84,38 +108,44 @@ function portOpen(port) {
   });
 }
 
-function waitForBackend(port, child, timeoutMs) {
+function waitForBackend(
+  port: string,
+  child: ChildProcess | null,
+  timeoutMs: number
+): Promise<BackendResult> {
   return new Promise((resolve) => {
     const start = Date.now();
     let done = false;
-    let timer = null;
-    const finish = (v) => {
+    let timer: NodeJS.Timeout | null = null;
+    const finish = (v: BackendResult) => {
       if (done) return;
       done = true;
       if (timer) clearInterval(timer);
       resolve(v);
     };
     if (child) {
-      child.on('error', (e) => finish({ ok: false, reason: '无法启动后端：' + e.message }));
-      child.on('exit', (code) => finish({ ok: false, reason: `后端进程意外退出（code=${code}）` }));
+      child.on('error', (e) => finish({ ok: false, spawned: false, reason: '无法启动后端：' + e.message }));
+      child.on('exit', (code) =>
+        finish({ ok: false, spawned: false, reason: `后端进程意外退出（code=${code}）` })
+      );
     }
     timer = setInterval(async () => {
-      if (await portOpen(port)) finish({ ok: true });
+      if (await portOpen(port)) finish({ ok: true, spawned: true });
       else if (Date.now() - start > timeoutMs) {
-        finish({ ok: false, reason: '等待后端启动超时（首次启动可能较慢）' });
+        finish({ ok: false, spawned: false, reason: '等待后端启动超时（首次启动可能较慢）' });
       }
     }, 500);
   });
 }
 
-async function ensureBackend() {
-  let u;
+async function ensureBackend(): Promise<BackendResult> {
+  let url: URL;
   try {
-    u = new URL(APP_URL);
-  } catch (e) {
+    url = new URL(APP_URL);
+  } catch {
     return { ok: false, spawned: false, reason: `无效的 DEEPSEEK_URL：${APP_URL}` };
   }
-  const port = u.port || (u.protocol === 'https:' ? '443' : '80');
+  const port = url.port || (url.protocol === 'https:' ? '443' : '80');
   if (await portOpen(port)) return { ok: true, spawned: false }; // already running
 
   if (!isLocalUrl(APP_URL)) {
@@ -134,27 +164,31 @@ async function ensureBackend() {
       env: process.env,
     });
   } catch (e) {
-    return { ok: false, spawned: false, reason: '无法启动后端：' + e.message };
+    return { ok: false, spawned: false, reason: '无法启动后端：' + (e as Error).message };
   }
 
   const r = await waitForBackend(port, backendChild, 90000);
   if (!r.ok) {
-    try {
-      process.kill(-backendChild.pid, 'SIGTERM');
-    } catch (e2) {}
+    if (backendChild?.pid) {
+      try {
+        process.kill(-backendChild.pid, 'SIGTERM');
+      } catch {
+        /* already gone */
+      }
+    }
     backendChild = null;
-    return { ok: false, spawned: false, reason: r.reason };
+    return r;
   }
   return { ok: true, spawned: true };
 }
 
-function loadLoading() {
+function loadLoading(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.loadFile('loading.html').catch(() => {});
   }
 }
 
-function showLoadingError(reason) {
+function showLoadingError(reason: string): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow
       .loadFile('loading.html', { query: { error: encodeURIComponent(reason) } })
@@ -162,7 +196,7 @@ function showLoadingError(reason) {
   }
 }
 
-function boot() {
+function boot(): Promise<void> {
   if (!bootPromise) {
     bootPromise = ensureBackend().then((r) => {
       bootPromise = null; // allow re-boot (e.g. window re-opened via Dock)
@@ -173,7 +207,7 @@ function boot() {
   return bootPromise;
 }
 
-function createWindow() {
+function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -193,33 +227,33 @@ function createWindow() {
     },
   });
 
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.once('ready-to-show', () => mainWindow?.show());
 
   // Show only the base app name in the title bar. The page sets
   // document.title to "<会话名> — DeepSeek Harness"; strip the prefix so the
   // title bar reads just "DeepSeek Harness" (adapts if the base name changes).
   mainWindow.on('page-title-updated', (event, title) => {
     event.preventDefault();
-    const base = String(title).split(' — ').pop().trim();
-    mainWindow.setTitle(base || 'DeepSeek Harness');
+    const base = String(title).split(' — ').pop()?.trim();
+    mainWindow?.setTitle(base || 'DeepSeek Harness');
   });
 
   // Open external links in the default browser; keep internal navigation in-app.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isInternal(url)) return { action: 'allow' };
-    shell.openExternal(url);
+    void shell.openExternal(url);
     return { action: 'deny' };
   });
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (!isInternal(url)) {
       event.preventDefault();
-      shell.openExternal(url);
+      void shell.openExternal(url);
     }
   });
 
   // Auto-reconnect if the backend is not running when the app starts.
-  mainWindow.webContents.on('did-fail-load', (event, code, desc, url, isMainFrame) => {
+  mainWindow.webContents.on('did-fail-load', (_event, code, _desc, _url, isMainFrame) => {
     if (isMainFrame && code !== -3) scheduleRetry();
   });
   mainWindow.webContents.on('did-finish-load', () => clearRetry());
@@ -232,7 +266,7 @@ function createWindow() {
   loadLoading();
 }
 
-function isInternal(url) {
+function isInternal(url: string): boolean {
   return (
     url.startsWith(APP_URL) ||
     url.startsWith('http://localhost:3080') ||
@@ -240,18 +274,18 @@ function isInternal(url) {
   );
 }
 
-function loadApp() {
+function loadApp(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.loadURL(APP_URL).catch(() => {});
   }
 }
 
-function scheduleRetry() {
+function scheduleRetry(): void {
   if (retryTimer) return;
   retryTimer = setInterval(loadApp, 3000);
 }
 
-function clearRetry() {
+function clearRetry(): void {
   if (retryTimer) {
     clearInterval(retryTimer);
     retryTimer = null;
@@ -261,7 +295,7 @@ function clearRetry() {
 // Keep the native window frame (title bar) in sync with the page's theme
 // preference ('dark' | 'light' | 'system'). When the user picks "跟随系统",
 // themeSource stays 'system' so the page keeps seeing the real OS scheme.
-function applyTheme(theme) {
+function applyTheme(theme: ThemeMode): void {
   nativeTheme.themeSource = theme;
   const dark = theme === 'dark' || (theme === 'system' && nativeTheme.shouldUseDarkColors);
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -269,23 +303,23 @@ function applyTheme(theme) {
   }
 }
 
-function buildMenu() {
+function buildMenu(): void {
   const isMac = process.platform === 'darwin';
-  const template = [
+  const template: MenuItemConstructorOptions[] = [
     ...(isMac
       ? [
           {
             label: app.name,
             submenu: [
-              { role: 'about' },
-              { type: 'separator' },
-              { role: 'services' },
-              { type: 'separator' },
-              { role: 'hide' },
-              { role: 'hideOthers' },
-              { role: 'unhide' },
-              { type: 'separator' },
-              { role: 'quit' },
+              { role: 'about' as const },
+              { type: 'separator' as const },
+              { role: 'services' as const },
+              { type: 'separator' as const },
+              { role: 'hide' as const },
+              { role: 'hideOthers' as const },
+              { role: 'unhide' as const },
+              { type: 'separator' as const },
+              { role: 'quit' as const },
             ],
           },
         ]
@@ -293,37 +327,37 @@ function buildMenu() {
     {
       label: 'Edit',
       submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
-        { type: 'separator' },
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
-        { role: 'selectAll' },
+        { role: 'undo' as const },
+        { role: 'redo' as const },
+        { type: 'separator' as const },
+        { role: 'cut' as const },
+        { role: 'copy' as const },
+        { role: 'paste' as const },
+        { role: 'selectAll' as const },
       ],
     },
     {
       label: 'View',
       submenu: [
-        { role: 'reload' },
-        { role: 'forceReload' },
-        { role: 'toggleDevTools' },
-        { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' },
+        { role: 'reload' as const },
+        { role: 'forceReload' as const },
+        { role: 'toggleDevTools' as const },
+        { type: 'separator' as const },
+        { role: 'resetZoom' as const },
+        { role: 'zoomIn' as const },
+        { role: 'zoomOut' as const },
+        { type: 'separator' as const },
+        { role: 'togglefullscreen' as const },
       ],
     },
     {
       label: 'Window',
       submenu: [
-        { role: 'minimize' },
-        { role: 'zoom' },
+        { role: 'minimize' as const },
+        { role: 'zoom' as const },
         ...(isMac
-          ? [{ type: 'separator' }, { role: 'front' }]
-          : [{ role: 'close' }]),
+          ? [{ type: 'separator' as const }, { role: 'front' as const }]
+          : [{ role: 'close' as const }]),
       ],
     },
   ];
@@ -348,13 +382,13 @@ if (!gotSingleInstanceLock) {
       applicationVersion: app.getVersion(),
       copyright: 'Desktop client for the local DeepSeek Harness',
     });
-    ipcMain.on('theme-changed', (event, theme) => {
+    ipcMain.on('theme-changed', (_event, theme: unknown) => {
       if (theme === 'dark' || theme === 'light' || theme === 'system') applyTheme(theme);
     });
     // Harness settings API lives here (main process): immune to any page CSP,
     // and a single, easily testable place to update if the harness changes
     // its settings API shape. Returns 'dark' | 'light' | 'system' | null.
-    ipcMain.handle('theme-preference', async () => {
+    ipcMain.handle('theme-preference', async (): Promise<ThemeMode | null> => {
       try {
         const api = APP_URL.replace(/\/+$/, '') + '/api/settings.describe';
         const res = await fetch(api, {
@@ -368,22 +402,22 @@ if (!gotSingleInstanceLock) {
           }),
         });
         if (!res.ok) return null;
-        const data = await res.json();
-        const namespaces = (data && data.result && data.result.value && data.result.value.namespaces) || [];
-        const ns = namespaces.find((n) => n && n.ns === 'ui-theme');
-        const pref = ns && ((ns.value && ns.value.preference) || (ns.user && ns.user.preference));
-        return pref === 'dark' || pref === 'light' || pref === 'system' ? pref : null;
-      } catch (e) {
+        const data = (await res.json()) as SettingsDocument;
+        const namespaces = data?.result?.value?.namespaces ?? [];
+        const ns = namespaces.find((n) => n.ns === 'ui-theme');
+        const pref = ns ? (ns.value?.preference ?? ns.user?.preference) : undefined;
+        return pref === 'dark' || pref === 'light' || pref === 'system' ? (pref as ThemeMode) : null;
+      } catch {
         return null;
       }
     });
     buildMenu();
     createWindow();
-    boot();
+    void boot();
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         createWindow();
-        boot();
+        void boot();
       }
     });
   });
@@ -391,10 +425,12 @@ if (!gotSingleInstanceLock) {
   // Full quit (Cmd+Q): stop the backend we spawned. Backends the user
   // started manually (spawned === false) are left untouched.
   app.on('will-quit', () => {
-    if (backendChild && backendChild.pid) {
+    if (backendChild?.pid) {
       try {
         process.kill(-backendChild.pid, 'SIGTERM');
-      } catch (e) {}
+      } catch {
+        /* already gone */
+      }
       backendChild = null;
     }
   });

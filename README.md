@@ -77,7 +77,7 @@ npm run dist            # 打包 .app + .dmg + .zip
 产物：
 
 - `dist/mac-arm64/DeepSeek.app`
-- `dist/DeepSeek-1.0.0-arm64.dmg`
+- `dist/DeepSeek-1.2.0-arm64.dmg`
 
 > 本机自用无需签名；若需对外发布，请配置 Apple Developer 签名与公证后移除 `package.json` 中 `build.mac.identity: null`。
 
@@ -85,7 +85,7 @@ npm run dist            # 打包 .app + .dmg + .zip
 
 通过 CDP Tracing 实测定位：网页在轨迹表、插件清单、长消息列表等重视图里**分配内存极快**，触发频繁的 V8 全量 GC，每次**停世界停顿 100-150ms** —— 表现为「首开卡一下」「滚动偶发卡顿」。渲染 / 合成 / GPU 本身全部健康。
 
-优化配置（`main.js`）：
+优化配置（`src/main.ts`）：
 
 | 配置 | 作用 |
 |---|---|
@@ -102,7 +102,7 @@ npm run dist            # 打包 .app + .dmg + .zip
 | 滚轮事件最大延迟 | 35433ms | **14ms** |
 | 轨迹视图内存 | 117MB→66MB 抖动 | 64MB 稳定 |
 
-> 注意：`--no-compact` 会牺牲少量堆内存（不压缩碎片），实测内存占用不升反降；若遇到内存异常增长，删除 `main.js` 中的 `--no-compact` 即可回退。
+> 注意：`--no-compact` 会牺牲少量堆内存（不压缩碎片），实测内存占用不升反降；若遇到内存异常增长，删除 `src/main.ts` 中的 `--no-compact` 即可回退。
 
 ## 🎨 主题同步原理
 
@@ -114,7 +114,7 @@ npm run dist            # 打包 .app + .dmg + .zip
 | 主题 DOM 信号 | `body[data-ds-dark-theme]` + `documentElement.style.colorScheme` |
 | 设置 API | `POST /api/settings.describe`（RPC 信封）的 `ui-theme.preference` 字段 |
 
-`preload.js` 监听 DOM 信号变化，并通过主进程的 settings API 读取用户偏好（`dark` / `light` / `system`），上报后由主进程设置 `nativeTheme.themeSource`。偏好为 `system` 时**保持 `themeSource = 'system'`**——这样页面里的 `prefers-color-scheme` 始终反映真实系统外观，窗口框架与系统实时联动（这是修复「跟随系统不联动」的关键）。
+`src/preload.ts` 监听 DOM 信号变化，并通过主进程的 settings API 读取用户偏好（`dark` / `light` / `system`），上报后由主进程设置 `nativeTheme.themeSource`。偏好为 `system` 时**保持 `themeSource = 'system'`**——这样页面里的 `prefers-color-scheme` 始终反映真实系统外观，窗口框架与系统实时联动（这是修复「跟随系统不联动」的关键）。
 
 ## 🔧 上游适配（harness 更新后）
 
@@ -124,27 +124,33 @@ harness 升级后跑一次自检，几秒就知道哪些契约变了、改哪里
 npm run check-compat
 ```
 
-输出 PASS / WARN / FAIL，每条 FAIL 都标注对应修复位置（`preload.js` / `main.js` 的具体函数）。即使 DOM 信号全部改变，`readTheme()` 还有「背景亮度回退检测」兜底——只要页面深浅背景色不同就能识别。
+输出 PASS / WARN / FAIL，每条 FAIL 都标注对应修复位置（`src/preload.ts` / `src/main.ts` 的具体函数）。即使 DOM 信号全部改变，`readTheme()` 还有「背景亮度回退检测」兜底——只要页面深浅背景色不同就能识别。
 
 ## 📁 项目结构
 
 ```
 oh-my-deepseek/
-├── main.js                       # Electron 主进程：窗口、菜单、后端自动启动/清理、主题/性能调优、settings API
-├── preload.js                    # 沙箱 preload：DOM 主题信号检测 + 偏好上报（IPC）
+├── src/                          # TypeScript 源码
+│   ├── main.ts                   # Electron 主进程：窗口、菜单、后端自动启动/清理、主题/性能调优、settings API
+│   ├── preload.ts                # 沙箱 preload：DOM 主题信号检测 + 偏好上报（IPC）
+│   └── scripts/
+│       ├── generate-icon.ts      # 自绘 App 图标（纯 Node，零依赖）
+│       └── check-harness-compat.ts # harness 上游契约自检
+├── out/                          # tsc 编译产物（构建时生成，不提交）
 ├── loading.html                  # 后端启动等待/错误界面
-├── scripts/
-│   ├── generate-icon.js          # 自绘 App 图标（纯 Node，零依赖）
-│   ├── make-icns.sh              # PNG → .icns（sips + iconutil）
-│   └── check-harness-compat.js   # harness 上游契约自检
+├── scripts/make-icns.sh          # PNG → .icns（sips + iconutil）
 ├── build/                        # 生成的应用图标（icon.icns / icon_1024.png）
+├── tsconfig.json                 # TypeScript 严格模式配置
 └── package.json                  # electron-builder 打包配置
 ```
+
+构建流程：`tsc`（`src/` → `out/`）→ electron-builder 打包 `out/` + `loading.html`。
 
 ## 🛠 技术栈
 
 - [Electron](https://www.electronjs.org/) 43（Chromium 150）
 - [electron-builder](https://www.electron.build/) 26
+- [TypeScript](https://www.typescriptlang.org/) 5（strict 模式）
 - V8 标志调优、CDP Tracing 性能剖析
 
 ## 📄 License

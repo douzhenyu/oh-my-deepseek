@@ -73,14 +73,53 @@ function isLocalUrl(url: string): boolean {
 
 function parseCommand(s: string): BackendCommand {
   const parts = (s.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((p) => p.replace(/^["']|["']$/g, ''));
-  return { cmd: parts[0] ?? '', args: parts.slice(1) };
+  let cmd = parts[0] ?? '';
+  // GUI-launched apps get launchd's minimal PATH (no /opt/homebrew/bin), so a
+  // bare `node` would fail with ENOENT — resolve the absolute node binary.
+  if (cmd === 'node' || cmd === 'nodejs') cmd = findNodePath() ?? cmd;
+  return { cmd, args: parts.slice(1) };
+}
+
+/**
+ * Locate an absolute Node.js binary without relying on PATH (which is minimal
+ * for apps launched from Finder/Dock). Checks Homebrew, MacPorts, nvm and a
+ * few common spots; returns null if none is found.
+ */
+function findNodePath(): string | null {
+  const candidates: string[] = [
+    '/opt/homebrew/bin/node', // Homebrew (Apple Silicon)
+    '/usr/local/bin/node', // Homebrew (Intel) / generic
+    '/opt/local/bin/node', // MacPorts
+    '/usr/bin/node', // system (rare)
+  ];
+  // Homebrew cellars may hold multiple versions
+  for (const cellar of ['/opt/homebrew/Cellar/node', '/usr/local/Cellar/node']) {
+    try {
+      for (const v of fs.readdirSync(cellar).sort()) {
+        candidates.push(path.join(cellar, v, 'bin', 'node'));
+      }
+    } catch {
+      /* skip */
+    }
+  }
+  // nvm
+  try {
+    const nvmDir = process.env.NVM_DIR || path.join(os.homedir(), '.nvm');
+    const versionsDir = path.join(nvmDir, 'versions', 'node');
+    for (const v of fs.readdirSync(versionsDir).sort()) {
+      candidates.push(path.join(versionsDir, v, 'bin', 'node'));
+    }
+  } catch {
+    /* skip */
+  }
+  return candidates.find((p) => fs.existsSync(p)) ?? null;
 }
 
 function resolveBackendCommand(): BackendCommand {
   // 1) explicit override: DEEPSEEK_BACKEND_CMD="node /path/to/dsh --port 3080"
   if (process.env.DEEPSEEK_BACKEND_CMD) return parseCommand(process.env.DEEPSEEK_BACKEND_CMD);
-  // 2) known absolute path from this machine
-  if (fs.existsSync(KNOWN_DSH_BIN)) return { cmd: 'node', args: [KNOWN_DSH_BIN] };
+  // 2) known absolute path from this machine (use an absolute node binary)
+  if (fs.existsSync(KNOWN_DSH_BIN)) return { cmd: findNodePath() ?? 'node', args: [KNOWN_DSH_BIN] };
   // 3) newest copy across npx cache dirs (harness updates may add a new one)
   try {
     const npxRoot = path.join(os.homedir(), '.npm', '_npx');
@@ -90,7 +129,7 @@ function resolveBackendCommand(): BackendCommand {
         .map((dir) => path.join(npxRoot, dir, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'))
         .filter((p) => fs.existsSync(p))
         .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-      if (hits.length > 0) return { cmd: 'node', args: [hits[0] as string] };
+      if (hits.length > 0) return { cmd: findNodePath() ?? 'node', args: [hits[0] as string] };
     }
   } catch {
     /* fall through to PATH */

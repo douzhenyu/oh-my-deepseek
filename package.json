@@ -1,0 +1,46 @@
+{
+  "name": "oh-my-deepseek",
+  "version": "1.0.0",
+  "description": "macOS desktop client for the local DeepSeek Harness (Electron)",
+  "main": "main.js",
+  "author": "douzhenyu",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/douzhenyu/oh-my-deepseek.git"
+  },
+  "homepage": "https://github.com/douzhenyu/oh-my-deepseek",
+  "scripts": {
+    "start": "electron .",
+    "generate-icon": "node scripts/generate-icon.js && bash scripts/make-icns.sh",
+    "check-compat": "node scripts/check-harness-compat.js",
+    "pack": "electron-builder --mac dir",
+    "dist": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.dou.deepseek-desktop",
+    "productName": "DeepSeek",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "build/icon.icns",
+      "identity": null
+    }
+  }
+}

@@ -1,6 +1,6 @@
 {
   "name": "oh-my-deepseek",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "macOS desktop client for the local DeepSeek Harness (Electron)",
   "main": "main.js",
   "author": "douzhenyu",
@@ -31,6 +31,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "loading.html",
       "package.json"
     ],
     "mac": {

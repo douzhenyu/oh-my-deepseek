@@ -9,6 +9,8 @@ DeepSeek Harness 的 macOS 桌面客户端 —— 把本地运行的 [DeepSeek H
 ## ✨ 功能特性
 
 - **原生桌面体验**：独立窗口 + Dock 图标 + 原生 macOS 菜单（复制/粘贴、缩放、全屏、⌘Q）
+- **一键启动后端**：启动客户端时自动拉起 DeepSeek Harness 后端（无命令行窗口）；彻底退出客户端（⌘Q）时自动关闭**由客户端启动的**后端——你手动启动的后端不会被碰
+- **启动等待界面**：后端启动期间显示转圈等待页（带计时），启动失败时给出明确错误提示
 - **主题三模式联动**：网页切深色 / 浅色 / 跟随系统，原生窗口标题栏实时同步；「跟随系统」模式下窗口框架与 macOS 系统外观实时联动（修复了强制 `themeSource` 导致跟随系统失效的 bug）
 - **性能调优**：CDP 时间线剖析定位到「V8 GC 停世界停顿」是卡顿根因，用 `--no-compact` 等调优把 100-150ms 的冻结降为 0（实测数据见下）
 - **自动重连**：后端未启动时每 3 秒自动重连，先开后端后开 App 也能自动连上
@@ -19,7 +21,7 @@ DeepSeek Harness 的 macOS 桌面客户端 —— 把本地运行的 [DeepSeek H
 
 ## 🚀 快速开始
 
-前置：本机已运行 DeepSeek Harness（`http://127.0.0.1:3080`）。
+前置：本机已安装 DeepSeek Harness（`dsh`）。**无需手动启动后端**——客户端会自动拉起。
 
 ### 本地构建
 
@@ -31,6 +33,21 @@ npm run generate-icon   # 生成 App 图标（build/icon.icns）
 npm run dist            # 打包 .app/.dmg 到 dist/
 open dist/mac-arm64/DeepSeek.app
 ```
+
+### 后端自动启动
+
+启动客户端时：
+
+1. 检测 `http://127.0.0.1:3080` 是否已有后端在运行——有则直接连接（不会重复启动，也不会在退出时关闭它）
+2. 没有则自动用 `dsh --profile web --port 3080` 无窗口启动（不弹命令行窗口），显示等待界面，就绪后进入主界面
+3. 彻底退出客户端（⌘Q）时，自动关闭由客户端启动的后端进程
+
+后端命令解析优先级：
+
+1. 环境变量 `DEEPSEEK_BACKEND_CMD`（例如 `DEEPSEEK_BACKEND_CMD="node /path/to/dsh/lib/bin.js"`）
+2. 已知的 npx 缓存路径
+3. 扫描 `~/.npm/_npx/*/node_modules/@deepseek-ai/dsh/` 取最新副本（适配 harness 升级）
+4. `PATH` 中的 `dsh`（全局安装时）
 
 ### 开发模式
 
@@ -113,8 +130,9 @@ npm run check-compat
 
 ```
 oh-my-deepseek/
-├── main.js                       # Electron 主进程：窗口、菜单、主题/性能调优、settings API
+├── main.js                       # Electron 主进程：窗口、菜单、后端自动启动/清理、主题/性能调优、settings API
 ├── preload.js                    # 沙箱 preload：DOM 主题信号检测 + 偏好上报（IPC）
+├── loading.html                  # 后端启动等待/错误界面
 ├── scripts/
 │   ├── generate-icon.js          # 自绘 App 图标（纯 Node，零依赖）
 │   ├── make-icns.sh              # PNG → .icns（sips + iconutil）

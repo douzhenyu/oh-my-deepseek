@@ -2,6 +2,10 @@
 
 const { app, BrowserWindow, Menu, shell, ipcMain, nativeTheme } = require('electron');
 const { randomUUID } = require('crypto');
+const { spawn } = require('child_process');
+const fs = require('fs');
+const net = require('net');
+const os = require('os');
 const path = require('path');
 
 const APP_URL = process.env.DEEPSEEK_URL || 'http://127.0.0.1:3080';
@@ -18,6 +22,156 @@ app.commandLine.appendSwitch('js-flags', '--no-compact --max-semi-space-size=64'
 
 let mainWindow = null;
 let retryTimer = null;
+let backendChild = null; // backend process spawned BY US (killed on quit)
+let bootPromise = null;
+
+// ---------------------------------------------------------------------------
+// Backend auto-start: when the user launches the client and no DeepSeek
+// Harness backend is listening, spawn it headless (no Terminal window), wait
+// for it to be ready, then load the GUI. On full quit (Cmd+Q), the spawned
+// backend is killed automatically. Backends the user started manually are
+// detected and never touched.
+// ---------------------------------------------------------------------------
+
+// Exact dsh entry on this machine (npx cache). Harness updates can change
+// this path; resolveBackendCommand() also scans for newer npx copies and
+// falls back to PATH / DEEPSEEK_BACKEND_CMD.
+const KNOWN_DSH_BIN =
+  '/Users/dou/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh/lib/bin.js';
+
+function isLocalUrl(url) {
+  try {
+    const h = new URL(url).hostname;
+    return h === '127.0.0.1' || h === 'localhost' || h === '::1';
+  } catch (e) {
+    return false;
+  }
+}
+
+function parseCommand(s) {
+  const parts = (s.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((p) => p.replace(/^["']|["']$/g, ''));
+  return { cmd: parts[0], args: parts.slice(1) };
+}
+
+function resolveBackendCommand() {
+  // 1) explicit override: DEEPSEEK_BACKEND_CMD="node /path/to/dsh --port 3080"
+  if (process.env.DEEPSEEK_BACKEND_CMD) return parseCommand(process.env.DEEPSEEK_BACKEND_CMD);
+  // 2) known absolute path from this machine
+  if (fs.existsSync(KNOWN_DSH_BIN)) return { cmd: 'node', args: [KNOWN_DSH_BIN] };
+  // 3) newest copy across npx cache dirs (harness updates may add a new one)
+  try {
+    const npxRoot = path.join(os.homedir(), '.npm', '_npx');
+    if (fs.existsSync(npxRoot)) {
+      const hits = fs
+        .readdirSync(npxRoot)
+        .map((d) => path.join(npxRoot, d, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'))
+        .filter((p) => fs.existsSync(p))
+        .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+      if (hits.length > 0) return { cmd: 'node', args: [hits[0]] };
+    }
+  } catch (e) {}
+  // 4) resolve 'dsh' via PATH (works if globally installed)
+  return { cmd: 'dsh', args: [] };
+}
+
+function portOpen(port) {
+  return new Promise((resolve) => {
+    const sock = net.connect(Number(port), '127.0.0.1', () => {
+      sock.destroy();
+      resolve(true);
+    });
+    sock.on('error', () => resolve(false));
+  });
+}
+
+function waitForBackend(port, child, timeoutMs) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    let done = false;
+    let timer = null;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      if (timer) clearInterval(timer);
+      resolve(v);
+    };
+    if (child) {
+      child.on('error', (e) => finish({ ok: false, reason: '无法启动后端：' + e.message }));
+      child.on('exit', (code) => finish({ ok: false, reason: `后端进程意外退出（code=${code}）` }));
+    }
+    timer = setInterval(async () => {
+      if (await portOpen(port)) finish({ ok: true });
+      else if (Date.now() - start > timeoutMs) {
+        finish({ ok: false, reason: '等待后端启动超时（首次启动可能较慢）' });
+      }
+    }, 500);
+  });
+}
+
+async function ensureBackend() {
+  let u;
+  try {
+    u = new URL(APP_URL);
+  } catch (e) {
+    return { ok: false, spawned: false, reason: `无效的 DEEPSEEK_URL：${APP_URL}` };
+  }
+  const port = u.port || (u.protocol === 'https:' ? '443' : '80');
+  if (await portOpen(port)) return { ok: true, spawned: false }; // already running
+
+  if (!isLocalUrl(APP_URL)) {
+    return {
+      ok: false,
+      spawned: false,
+      reason: `目标地址 ${APP_URL} 不是本机服务，客户端不会自动启动后端，请先手动启动。`,
+    };
+  }
+
+  const bc = resolveBackendCommand();
+  try {
+    backendChild = spawn(bc.cmd, [...bc.args, '--profile', 'web', '--port', port], {
+      stdio: 'ignore',
+      detached: true, // own process group so we can kill the whole tree on quit
+      env: process.env,
+    });
+  } catch (e) {
+    return { ok: false, spawned: false, reason: '无法启动后端：' + e.message };
+  }
+
+  const r = await waitForBackend(port, backendChild, 90000);
+  if (!r.ok) {
+    try {
+      process.kill(-backendChild.pid, 'SIGTERM');
+    } catch (e2) {}
+    backendChild = null;
+    return { ok: false, spawned: false, reason: r.reason };
+  }
+  return { ok: true, spawned: true };
+}
+
+function loadLoading() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.loadFile('loading.html').catch(() => {});
+  }
+}
+
+function showLoadingError(reason) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow
+      .loadFile('loading.html', { query: { error: encodeURIComponent(reason) } })
+      .catch(() => {});
+  }
+}
+
+function boot() {
+  if (!bootPromise) {
+    bootPromise = ensureBackend().then((r) => {
+      bootPromise = null; // allow re-boot (e.g. window re-opened via Dock)
+      if (r.ok) loadApp();
+      else if (r.reason) showLoadingError(r.reason);
+    });
+  }
+  return bootPromise;
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -75,7 +229,7 @@ function createWindow() {
     mainWindow = null;
   });
 
-  loadApp();
+  loadLoading();
 }
 
 function isInternal(url) {
@@ -225,9 +379,24 @@ if (!gotSingleInstanceLock) {
     });
     buildMenu();
     createWindow();
+    boot();
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+        boot();
+      }
     });
+  });
+
+  // Full quit (Cmd+Q): stop the backend we spawned. Backends the user
+  // started manually (spawned === false) are left untouched.
+  app.on('will-quit', () => {
+    if (backendChild && backendChild.pid) {
+      try {
+        process.kill(-backendChild.pid, 'SIGTERM');
+      } catch (e) {}
+      backendChild = null;
+    }
   });
 
   app.on('window-all-closed', () => {

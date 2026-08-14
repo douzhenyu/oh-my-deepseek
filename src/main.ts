@@ -108,6 +108,20 @@ function portOpen(port: string): Promise<boolean> {
   });
 }
 
+function backendLogPath(): string {
+  return path.join(app.getPath('userData'), 'backend.log');
+}
+
+function backendLogTail(maxChars = 900): string {
+  try {
+    const p = backendLogPath();
+    if (!fs.existsSync(p)) return '';
+    return fs.readFileSync(p, 'utf8').slice(-maxChars);
+  } catch {
+    return '';
+  }
+}
+
 function waitForBackend(
   port: string,
   child: ChildProcess | null,
@@ -158,10 +172,23 @@ async function ensureBackend(): Promise<BackendResult> {
 
   const bc = resolveBackendCommand();
   try {
-    backendChild = spawn(bc.cmd, [...bc.args, '--profile', 'web', '--port', port], {
-      stdio: 'ignore',
+    // Capture the spawned backend's stderr into a log file (and the app's
+    // stderr) so startup failures are diagnosable instead of invisible.
+    const logStream = fs.createWriteStream(backendLogPath(), { flags: 'a' });
+    const argv = [...bc.args, '--profile', 'web', '--port', port];
+    console.error(`[backend] spawning: ${bc.cmd} ${argv.join(' ')}`);
+    logStream.write(`\n[${new Date().toISOString()}] spawn: ${bc.cmd} ${argv.join(' ')}\n`);
+    backendChild = spawn(bc.cmd, argv, {
+      stdio: ['ignore', 'ignore', 'pipe'],
       detached: true, // own process group so we can kill the whole tree on quit
       env: process.env,
+    });
+    backendChild.stderr?.on('data', (d: Buffer) => {
+      logStream.write(d);
+      console.error('[backend]', String(d).trimEnd());
+    });
+    backendChild.on('close', () => {
+      logStream.end();
     });
   } catch (e) {
     return { ok: false, spawned: false, reason: '无法启动后端：' + (e as Error).message };
@@ -190,8 +217,11 @@ function loadLoading(): void {
 
 function showLoadingError(reason: string): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
+    // Surface the backend log tail so real failures are visible.
+    const tail = backendLogTail();
+    const detail = tail ? `${reason}\n\n--- 后端日志（末尾）---\n${tail}` : reason;
     mainWindow
-      .loadFile('loading.html', { query: { error: encodeURIComponent(reason) } })
+      .loadFile('loading.html', { query: { error: encodeURIComponent(detail) } })
       .catch(() => {});
   }
 }

@@ -10,7 +10,8 @@
  * @module main/smoke
  */
 
-import { writeFileSync } from 'node:fs'
+import { rmSync, writeFileSync } from 'node:fs'
+import { isNewer, sizeOf } from './client-update.ts'
 import { containerConfig } from './config.ts'
 import type { Container } from './container.ts'
 import type { WindowManager } from './windows.ts'
@@ -33,6 +34,8 @@ interface ConsoleProbe {
   heading: string
   /** Status pill text, which proves the state arrived over IPC. */
   status: string
+  /** Client update card text, which proves the new card rendered. */
+  clientNote: string
 }
 
 /** What the console window reports about its own appearance. */
@@ -81,6 +84,18 @@ export interface SmokeReport {
     returnedToShared?: boolean
     error?: string
   }
+  clientUpdate?: {
+    ok: boolean
+    currentVersion?: string
+    latest?: string
+    available?: boolean
+    assetName?: string
+    downloadedBytes?: number
+    cleanedUp?: boolean
+    /** Decision-table results, so the offer logic is checked without a newer release existing. */
+    comparison?: { newer: boolean; equal: boolean; older: boolean; prerelease: boolean }
+    error?: string
+  }
   install?: {
     version: string
     ok: boolean
@@ -125,11 +140,11 @@ const waitForBoot = async (windows: WindowManager, timeoutMs: number): Promise<P
  */
 const waitForConsole = async (windows: WindowManager, timeoutMs: number): Promise<ConsoleProbe> => {
   const deadline = Date.now() + timeoutMs
-  let last: ConsoleProbe = { ready: false, heading: '', status: '' }
+  let last: ConsoleProbe = { ready: false, heading: '', status: '', clientNote: '' }
   while (Date.now() < deadline) {
     try {
       last = await windows.evaluateConsole<ConsoleProbe>(
-        "({ ready: document.documentElement.dataset.consoleReady === 'true', heading: (document.getElementById('heading') || {}).textContent || '', status: (document.getElementById('status') || {}).textContent || '' })",
+        "({ ready: document.documentElement.dataset.consoleReady === 'true', heading: (document.getElementById('heading') || {}).textContent || '', status: (document.getElementById('status') || {}).textContent || '', clientNote: (document.getElementById('client-note') || {}).textContent || '' })",
       )
       if (last.ready) return last
     } catch {
@@ -151,6 +166,57 @@ const probeHttp = async (container: Container): Promise<{ rootWithoutCookie: num
   const unauthorised = await fetch(`http://127.0.0.1:${String(info.port)}/`, { redirect: 'manual' })
   const handoff = await fetch(info.url, { redirect: 'manual' })
   return { rootWithoutCookie: unauthorised.status, tokenHandoff: handoff.status }
+}
+
+/**
+ * Exercise the client's own update path against the real release feed.
+ *
+ * It checks, resolves the asset for this platform, downloads it through the same
+ * code the console uses, and then removes it: the point is that the transfer
+ * verified byte-for-byte, not that a 200 MB installer is left in the user's
+ * downloads folder.
+ * @param container - The running container.
+ * @returns The scenario result, never throwing.
+ */
+const exerciseClientUpdate = async (container: Container): Promise<NonNullable<SmokeReport['clientUpdate']>> => {
+  const result: NonNullable<SmokeReport['clientUpdate']> = { ok: false }
+  try {
+    // The feed currently holds this same version, so the "newer" branch cannot be
+    // reached from it; check the decision table directly instead.
+    result.comparison = {
+      newer: isNewer('0.1.2', '0.1.1'),
+      equal: isNewer('0.1.1', '0.1.1'),
+      older: isNewer('0.1.0', '0.1.1'),
+      prerelease: isNewer('0.1.1-rc.1', '0.1.1'),
+    }
+    if (result.comparison.newer !== true || result.comparison.equal !== false
+      || result.comparison.older !== false || result.comparison.prerelease !== false) {
+      throw new Error(`the update decision table is wrong: ${JSON.stringify(result.comparison)}`)
+    }
+    await container.checkClientUpdate()
+    const checked = container.snapshot().client
+    result.currentVersion = checked.currentVersion
+    result.latest = checked.latest?.version
+    result.available = checked.available
+    result.assetName = checked.latest?.assetName
+    if (checked.error !== undefined) throw new Error(`check failed: ${checked.error}`)
+    if (checked.latest === undefined) throw new Error('no release was resolved')
+    if (checked.latest.assetName === undefined) {
+      throw new Error(`the newest release has no build for ${process.platform}-${process.arch}`)
+    }
+    await container.downloadClientUpdate()
+    const downloaded = container.snapshot().client
+    if (downloaded.error !== undefined) throw new Error(`download failed: ${downloaded.error}`)
+    if (downloaded.downloadedPath === undefined) throw new Error('no file was produced')
+    result.downloadedBytes = sizeOf(downloaded.downloadedPath)
+    if (result.downloadedBytes <= 0) throw new Error(`the downloaded file is empty: ${downloaded.downloadedPath}`)
+    rmSync(downloaded.downloadedPath, { force: true })
+    result.cleanedUp = true
+    result.ok = true
+  } catch (error) {
+    result.error = error instanceof Error ? error.message : String(error)
+  }
+  return result
 }
 
 /**
@@ -245,6 +311,7 @@ const installAndSwitch = async (
  * @param reportPath - File to write the JSON report to.
  * @param options - `install` additionally installs a published version and
  *   switches the backend onto it, which is the update path users exercise.
+ * @param options.clientUpdate - Whether to exercise the client's own update path.
  * @param options.install - Version to install and activate, when requested.
  * @param options.homeMode - Harness home to switch to, when requested.
  * @param options.launchMs - How long the initial launch took, measured by the caller.
@@ -254,7 +321,7 @@ export const runSmoke = async (
   container: Container,
   windows: WindowManager,
   reportPath: string,
-  options: { install?: string; homeMode?: string; launchMs: number },
+  options: { install?: string; homeMode?: string; clientUpdate?: boolean; launchMs: number },
 ): Promise<void> => {
   const started = Date.now()
   const state = container.snapshot()
@@ -278,6 +345,7 @@ export const runSmoke = async (
     report.console = console_
     report.timings['consoleBoot'] = Date.now() - started
     if (console_.heading.trim() === '') throw new Error('the console window rendered no heading')
+    if (console_.clientNote.trim() === '') throw new Error('the client update card rendered no status line')
     const brand = containerConfig().productName
     if (console_.heading.trim() !== brand) throw new Error(`the console heading is "${console_.heading}", expected the product name "${brand}"`)
     const page = await waitForBoot(windows, 60_000)
@@ -298,6 +366,7 @@ export const runSmoke = async (
     if (Number.isNaN(value)) throw new Error(`the console background is not a colour: ${appearance.background}`)
     if (appearance.dark && value > 96) throw new Error(`the system is dark but the console renders a light background (${appearance.background})`)
     if (!appearance.dark && value < 160) throw new Error(`the system is light but the console renders a dark background (${appearance.background})`)
+    if (options.clientUpdate === true) report.clientUpdate = await exerciseClientUpdate(container)
     if (options.homeMode !== undefined) report.home = await switchHome(container, windows, options.homeMode)
     if (options.install !== undefined) report.install = await installAndSwitch(container, windows, options.install)
     report.ok = report.install === undefined || report.install.ok

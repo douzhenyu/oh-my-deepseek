@@ -28,6 +28,11 @@ const bridge: ContainerBridge = {
   reveal: (target: RevealTarget) => ipcRenderer.invoke(CHANNELS.reveal, target) as Promise<void>,
   updateSettings: (patch: SettingsPatch) => ipcRenderer.invoke(CHANNELS.updateSettings, patch) as Promise<void>,
   setHarnessHome: (mode: HarnessHomeMode) => ipcRenderer.invoke(CHANNELS.setHarnessHome, mode) as Promise<void>,
+  checkClientUpdate: () => ipcRenderer.invoke(CHANNELS.checkClientUpdate) as Promise<void>,
+  downloadClientUpdate: () => ipcRenderer.invoke(CHANNELS.downloadClientUpdate) as Promise<void>,
+  installClientUpdate: () => ipcRenderer.invoke(CHANNELS.installClientUpdate) as Promise<void>,
+  revealClientUpdate: () => ipcRenderer.invoke(CHANNELS.revealClientUpdate) as Promise<void>,
+  openClientRelease: () => ipcRenderer.invoke(CHANNELS.openClientRelease) as Promise<void>,
 }
 
 contextBridge.exposeInMainWorld('container', bridge)

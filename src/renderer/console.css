@@ -119,3 +119,6 @@ button.danger:hover:not(:disabled) { border-color: var(--bad); color: var(--bad)
 .custom { margin-top: 10px; }
 .custom summary { font-size: 12px; color: var(--muted); cursor: pointer; }
 .custom[open] summary { margin-bottom: 8px; }
+
+/* The download bar shows real progress, unlike the indeterminate backend bar. */
+.progress-fill { width: 0; animation: none; transition: width .15s linear; }

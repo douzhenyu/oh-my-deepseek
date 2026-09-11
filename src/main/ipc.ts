@@ -38,6 +38,7 @@ const asSettingsPatch = (value: unknown): SettingsPatch => {
   if (typeof source.port === 'number' && Number.isInteger(source.port) && source.port >= 0 && source.port <= 65535) patch.port = source.port
   if (typeof source.autoStart === 'boolean') patch.autoStart = source.autoStart
   if (typeof source.checkUpdatesOnLaunch === 'boolean') patch.checkUpdatesOnLaunch = source.checkUpdatesOnLaunch
+  if (typeof source.checkClientUpdatesOnLaunch === 'boolean') patch.checkClientUpdatesOnLaunch = source.checkClientUpdatesOnLaunch
   if (typeof source.dshHome === 'string') patch.dshHome = source.dshHome
   return patch
 }
@@ -59,4 +60,9 @@ export const registerIpc = (container: Container, hooks: { openHarness: () => vo
   ipcMain.handle(CHANNELS.reveal, async (_event, target: unknown) => { await container.reveal(asRevealTarget(target)) })
   ipcMain.handle(CHANNELS.updateSettings, (_event, patch: unknown) => { container.applySettings(asSettingsPatch(patch)) })
   ipcMain.handle(CHANNELS.setHarnessHome, async (_event, mode: unknown) => { await container.setHarnessHome(asHomeMode(mode)) })
+  ipcMain.handle(CHANNELS.checkClientUpdate, async () => { await container.checkClientUpdate() })
+  ipcMain.handle(CHANNELS.downloadClientUpdate, async () => { await container.downloadClientUpdate() })
+  ipcMain.handle(CHANNELS.installClientUpdate, async () => { await container.installClientUpdate() })
+  ipcMain.handle(CHANNELS.revealClientUpdate, () => { container.revealClientUpdate() })
+  ipcMain.handle(CHANNELS.openClientRelease, async () => { await container.openClientRelease() })
 }

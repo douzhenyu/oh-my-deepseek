@@ -14,6 +14,17 @@ import semver from 'semver'
 import type { ContainerSettings, ContainerState, HarnessHomeMode, InstalledVersion, RevealTarget } from '../shared/types.ts'
 import { BackendService, resolvePort, type BackendInfo } from './backend.ts'
 import { containerConfig } from './config.ts'
+import {
+  checkForUpdate,
+  downloadRelease,
+  installMode,
+  installRelease,
+  isNewer,
+  openReleasePage,
+  revealRelease,
+  sizeOf,
+  type ClientRelease,
+} from './client-update.ts'
 import { homeForMode, modeOf, seedSeparateHome } from './harness-home.ts'
 import { strings } from './locale.ts'
 import type { ContainerLog } from './log.ts'
@@ -37,6 +48,8 @@ export class Container {
   private state: ContainerState
   private queue: Promise<unknown> = Promise.resolve()
   private remoteTags = new Map<string, string[]>()
+  private offeredRelease: ClientRelease | undefined
+  private clientAbort: AbortController | undefined
   private emitTimer: NodeJS.Timeout | undefined
 
   /**
@@ -65,7 +78,15 @@ export class Container {
       platform: process.platform,
       autoStart: true,
       checkUpdatesOnLaunch: true,
+      checkClientUpdatesOnLaunch: true,
       updateAvailable: false,
+      client: {
+        currentVersion: app.getVersion(),
+        available: false,
+        checking: false,
+        downloading: false,
+        installMode: installMode(),
+      },
     }
   }
 
@@ -156,6 +177,7 @@ export class Container {
       phase: 'checking',
       autoStart: settings.autoStart,
       checkUpdatesOnLaunch: settings.checkUpdatesOnLaunch,
+      checkClientUpdatesOnLaunch: settings.checkClientUpdatesOnLaunch,
       dshHome: this.homeLabel(),
       dshHomeOverride: this.effectiveHome() ?? '',
       harnessHomeMode: modeOf(this.effectiveHome()),
@@ -164,6 +186,7 @@ export class Container {
     const bundled = this.installed.find((candidate) => candidate.source === 'bundled')?.version
     this.patch({ ...(bundled === undefined ? {} : { bundledVersion: bundled }) })
     if (settings.checkUpdatesOnLaunch) void this.refreshRemote()
+    if (settings.checkClientUpdatesOnLaunch) void this.checkClientUpdate()
     if (!settings.autoStart) {
       const active = this.chooseVersion()
       this.patch({ phase: 'stopped', ...(active === undefined ? {} : { activeVersion: active }) })
@@ -395,6 +418,7 @@ export class Container {
     this.patch({
       autoStart: next.autoStart,
       checkUpdatesOnLaunch: next.checkUpdatesOnLaunch,
+      checkClientUpdatesOnLaunch: next.checkClientUpdatesOnLaunch,
       dshHome: this.homeLabel(),
       dshHomeOverride: this.effectiveHome() ?? '',
       harnessHomeMode: modeOf(this.effectiveHome()),
@@ -426,6 +450,121 @@ export class Container {
         this.fail(error)
       }
     })
+  }
+
+  /** Merge a patch into the client update state. @param patch - Fields to replace. */
+  private patchClient(patch: Partial<ContainerState['client']>): void {
+    this.patch({ client: { ...this.state.client, ...patch } })
+  }
+
+  /**
+   * Look for a newer client release.
+   * @returns Completion once the state carries the result.
+   */
+  async checkClientUpdate(): Promise<void> {
+    this.patchClient({ checking: true, error: undefined })
+    try {
+      const release = await checkForUpdate()
+      this.offeredRelease = release
+      const available = isNewer(release.version, app.getVersion())
+      this.patchClient({
+        checking: false,
+        available,
+        latest: {
+          version: release.version,
+          name: release.name,
+          pageUrl: release.pageUrl,
+          ...(release.asset === undefined ? {} : { assetName: release.asset.name, assetSize: release.asset.size }),
+        },
+      })
+      this.log.push('client', `newest release is ${release.tag}; running ${app.getVersion()}${available ? ' (update available)' : ''}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.log.push('client', `update check failed: ${message}`)
+      this.patchClient({ checking: false, error: message })
+    }
+  }
+
+  /**
+   * Download the offered release.
+   * @returns Completion once the file is ready to apply.
+   */
+  downloadClientUpdate(): Promise<void> {
+    return this.enqueue(async () => {
+      const release = this.offeredRelease
+      if (release === undefined) {
+        this.patchClient({ error: 'no release has been resolved yet' })
+        return
+      }
+      if (release.asset === undefined) {
+        this.patchClient({ error: `release ${release.tag} has no build for ${process.platform}-${process.arch}` })
+        return
+      }
+      this.clientAbort = new AbortController()
+      this.patchClient({ downloading: true, progress: 0, error: undefined, downloadedPath: undefined })
+      this.log.push('client', `downloading ${release.asset.name}`)
+      try {
+        const file = await downloadRelease(
+          release,
+          (received, total) => {
+            this.patchClient({ progress: total > 0 ? Math.min(1, received / total) : undefined })
+          },
+          this.clientAbort.signal,
+        )
+        const size = sizeOf(file)
+        this.patchClient({ downloading: false, progress: 1, downloadedPath: file })
+        this.log.push('client', `downloaded ${file} (${(size / 1024 / 1024).toFixed(1)} MB)`)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.log.push('client', `download failed: ${message}`)
+        this.patchClient({ downloading: false, progress: undefined, error: message })
+      } finally {
+        this.clientAbort = undefined
+      }
+    })
+  }
+
+  /**
+   * Apply a downloaded release.
+   *
+   * Windows launches the installer and then quits so it can replace the
+   * application; macOS opens the disk image for the user to drag across.
+   * @returns Completion once the platform action was taken.
+   */
+  installClientUpdate(): Promise<void> {
+    return this.enqueue(async () => {
+      const file = this.state.client.downloadedPath
+      if (file === undefined) {
+        this.patchClient({ error: 'no downloaded release is ready' })
+        return
+      }
+      try {
+        const mode = await installRelease(file)
+        this.log.push('client', mode === 'installer' ? 'installer started; quitting so it can replace the application' : 'opened the disk image for a manual replacement')
+        if (mode === 'installer') {
+          // The installer replaces the application directory this process runs from.
+          app.quit()
+        } else {
+          this.patchClient({ error: undefined })
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.log.push('client', `could not apply the update: ${message}`)
+        this.patchClient({ error: message })
+      }
+    })
+  }
+
+  /** Reveal the downloaded release in the platform file manager. */
+  revealClientUpdate(): void {
+    const file = this.state.client.downloadedPath
+    if (file !== undefined) revealRelease(file)
+  }
+
+  /** Open the offered release's page in the default browser. */
+  async openClientRelease(): Promise<void> {
+    const page = this.state.client.latest?.pageUrl
+    if (page !== undefined) await openReleasePage(page)
   }
 
   /** Settings as the console should display them. */

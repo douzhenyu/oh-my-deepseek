@@ -13,6 +13,7 @@
  *   npm run smoke -- --binary "<app binary>" # verify a packaged application
  *   npm run smoke -- --home separate         # verify the independent harness home
  *   npm run smoke -- --theme dark            # verify the other colour scheme
+ *   npm run smoke -- --client-update         # check and download from the release feed
  */
 
 import { execFileSync, spawn } from 'node:child_process'
@@ -33,6 +34,7 @@ const binaryPath = optionValue('--binary')
 const installVersion = optionValue('--install')
 const homeMode = optionValue('--home')
 const forcedTheme = optionValue('--theme')
+const clientUpdate = process.argv.includes('--client-update')
 
 const keep = process.argv.includes('--keep')
 
@@ -145,6 +147,7 @@ const child = spawn(electron, [
   ...(installVersion === undefined ? [] : ['--smoke-install', installVersion]),
   ...(homeMode === undefined ? [] : ['--smoke-home-mode', homeMode]),
   ...(forcedTheme === undefined ? [] : ['--smoke-theme', forcedTheme]),
+  ...(clientUpdate ? ['--smoke-client-update'] : []),
 ], {
   cwd: at('.'),
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -185,6 +188,22 @@ check(`the console is branded "${config.productName}"`, report.console?.heading 
 check('the Harness page booted', report.page !== undefined && report.page.mode !== 'queue', JSON.stringify(report.page ?? {}))
 check('unauthenticated requests are rejected', report.http?.rootWithoutCookie === 401, `status ${String(report.http?.rootWithoutCookie)}`)
 check('the one-time token URL is honoured', report.http?.tokenHandoff === 303, `status ${String(report.http?.tokenHandoff)}`)
+if (clientUpdate) {
+  const update = report.clientUpdate
+  check('the client update check resolved a release', update?.latest !== undefined, update?.error ?? `running ${update?.currentVersion}`)
+  const table = update?.comparison
+  check(
+    'the update offer only fires for a strictly newer release',
+    table?.newer === true && table.equal === false && table.older === false && table.prerelease === false,
+    table === undefined ? 'not checked' : `newer=${String(table.newer)} equal=${String(table.equal)} older=${String(table.older)} prerelease=${String(table.prerelease)}`,
+  )
+  check(`a build for this platform was found`, update?.assetName !== undefined, update?.assetName ?? 'none')
+  check(
+    'the release downloaded and matched the advertised size',
+    (update?.downloadedBytes ?? 0) > 0 && update.cleanedUp === true,
+    update?.downloadedBytes === undefined ? (update?.error ?? 'no file') : `${(update.downloadedBytes / 1048576).toFixed(1)} MB, removed after the check`,
+  )
+}
 if (homeMode !== undefined) {
   const separate = join(userData, 'harness-home')
   check(`the container switched to the ${homeMode} harness home`, report.home?.ok === true, report.home?.error ?? '')

@@ -55,6 +55,42 @@ export interface OperationProgress {
   total?: number
 }
 
+/** A published client release the console can offer. */
+export interface ClientReleaseInfo {
+  /** Version without the tag prefix, for example `0.1.1`. */
+  version: string
+  /** Release title. */
+  name: string
+  /** Human-facing release page. */
+  pageUrl: string
+  /** Name of the file this platform would install, absent when the release has none. */
+  assetName?: string
+  /** Size of that file in bytes. */
+  assetSize?: number
+}
+
+/** State of the client's own update check, which is separate from dsh versions. */
+export interface ClientUpdateState {
+  /** The running application version. */
+  currentVersion: string
+  /** Newest published release, once a check succeeds. */
+  latest?: ClientReleaseInfo
+  /** Whether `latest` is newer than `currentVersion`. */
+  available: boolean
+  /** Whether a release lookup is in flight. */
+  checking: boolean
+  /** Whether an asset download is in flight. */
+  downloading: boolean
+  /** Download completion from 0 to 1, absent while the size is unknown. */
+  progress?: number
+  /** Absolute path of a downloaded release ready to apply. */
+  downloadedPath?: string
+  /** Why the last check or download failed. */
+  error?: string
+  /** How this platform applies a downloaded release. */
+  installMode: 'installer' | 'manual'
+}
+
 /** The complete console-visible state; every field is safe to serialize to JSON. */
 export interface ContainerState {
   /** Current lifecycle phase. */
@@ -101,6 +137,10 @@ export interface ContainerState {
   autoStart: boolean
   /** Whether the container queries the registry during launch. */
   checkUpdatesOnLaunch: boolean
+  /** Whether the container queries the release feed during launch. */
+  checkClientUpdatesOnLaunch: boolean
+  /** Client update state, independent of the harness versions below it. */
+  client: ClientUpdateState
   /** Version the `latest` tag names, when the registry reported one. */
   latestVersion?: string
   /** Whether a published version is newer than the active one. */
@@ -115,8 +155,10 @@ export interface ContainerSettings {
   port: number
   /** Whether to start the backend during launch. */
   autoStart: boolean
-  /** Whether to query the registry during launch. */
+  /** Whether to query the registry for harness versions during launch. */
   checkUpdatesOnLaunch: boolean
+  /** Whether to query the release feed for a newer client during launch. */
+  checkClientUpdatesOnLaunch: boolean
   /** Harness home; absent means the standard `DSH_HOME` then `~/.dsh`. */
   dshHome?: string
 }
@@ -147,6 +189,16 @@ export const CHANNELS = {
   updateSettings: 'container:settings:update',
   /** Renderer → main: switch between the shared and the independent harness home. */
   setHarnessHome: 'container:home:set',
+  /** Renderer → main: look for a newer client release. */
+  checkClientUpdate: 'container:client:check',
+  /** Renderer → main: download the offered client release. */
+  downloadClientUpdate: 'container:client:download',
+  /** Renderer → main: apply the downloaded client release. */
+  installClientUpdate: 'container:client:install',
+  /** Renderer → main: reveal the downloaded client release in the file manager. */
+  revealClientUpdate: 'container:client:reveal',
+  /** Renderer → main: open the release page in the default browser. */
+  openClientRelease: 'container:client:page',
 } as const
 
 /** Operations the console may open a platform file manager for. */
@@ -181,4 +233,14 @@ export interface ContainerBridge {
   updateSettings(patch: SettingsPatch): Promise<void>
   /** Switch harness home and restart the backend on it. */
   setHarnessHome(mode: HarnessHomeMode): Promise<void>
+  /** Look for a newer client release. */
+  checkClientUpdate(): Promise<void>
+  /** Download the offered client release. */
+  downloadClientUpdate(): Promise<void>
+  /** Apply the downloaded client release. */
+  installClientUpdate(): Promise<void>
+  /** Reveal the downloaded client release in the file manager. */
+  revealClientUpdate(): Promise<void>
+  /** Open the offered release's page. */
+  openClientRelease(): Promise<void>
 }

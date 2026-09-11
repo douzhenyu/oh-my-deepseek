@@ -40,6 +40,28 @@
 
     <section class="card">
       <div class="card-head">
+        <h2 id="client-title">Client</h2>
+        <div class="actions">
+          <button id="client-check" type="button"></button>
+          <button id="client-download" class="primary" type="button"></button>
+          <button id="client-install" class="primary" type="button"></button>
+          <button id="client-reveal" type="button"></button>
+          <button id="client-page" type="button"></button>
+        </div>
+      </div>
+      <dl class="facts">
+        <dt id="client-current-label">Installed</dt>
+        <dd id="client-current-value">—</dd>
+        <dt id="client-latest-label">Latest</dt>
+        <dd id="client-latest-value">—</dd>
+      </dl>
+      <p id="client-note" class="note"></p>
+      <div id="client-progress" class="progress" hidden><div class="bar progress-fill"></div></div>
+      <p id="client-error" class="error" hidden></p>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
         <h2 id="version-title">Harness version</h2>
         <div class="actions">
           <button id="refresh" type="button"></button>
@@ -87,6 +109,7 @@
       </details>
       <label class="toggle"><input id="auto-start" type="checkbox" /> <span id="auto-start-label"></span></label>
       <label class="toggle"><input id="check-on-launch" type="checkbox" /> <span id="check-on-launch-label"></span></label>
+      <label class="toggle"><input id="check-client-on-launch" type="checkbox" /> <span id="check-client-on-launch-label"></span></label>
     </section>
 
     <section class="card">

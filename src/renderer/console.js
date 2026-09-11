@@ -12,6 +12,22 @@ const COPY = {
   en: {
     tagline: 'The harness runs inside this application. Closing it stops the backend.',
     backend: 'Backend',
+    client: 'Client',
+    clientCurrent: 'Installed',
+    clientLatest: 'Latest',
+    clientCheck: 'Check for updates',
+    clientChecking: 'Checking…',
+    clientDownload: 'Download update',
+    clientDownloading: 'Downloading…',
+    clientInstall: 'Install and restart',
+    clientOpen: 'Open the disk image',
+    clientReveal: 'Show the file',
+    clientPage: 'Release notes',
+    clientUpToDate: 'You are running the newest release.',
+    clientAvailable: (version) => `Version ${version} is available.`,
+    clientUnknown: 'Not checked yet.',
+    clientManual: 'This build is unsigned, so macOS will not let the client replace itself. The update downloads, then you drag the app onto Applications — your sessions and settings stay in place.',
+    clientInstaller: 'The installer runs and the client quits so it can replace itself.',
     versions: 'Harness version',
     advanced: 'Advanced',
     log: 'Log',
@@ -43,6 +59,7 @@ const COPY = {
     saveHome: 'Save and restart',
     autoStart: 'Start the backend when the container opens',
     checkOnLaunch: 'Check for new harness versions on launch',
+    checkClientOnLaunch: 'Check for a new client version on launch',
     bundled: 'bundled',
     installedBadge: 'installed',
     activeBadge: 'active',
@@ -64,6 +81,22 @@ const COPY = {
   zh: {
     tagline: 'Harness 运行在本客户端内。关闭客户端会同时结束后台进程。',
     backend: '后台服务',
+    client: '客户端',
+    clientCurrent: '当前版本',
+    clientLatest: '最新版本',
+    clientCheck: '检查客户端更新',
+    clientChecking: '检查中…',
+    clientDownload: '下载更新',
+    clientDownloading: '下载中…',
+    clientInstall: '安装并重启',
+    clientOpen: '打开安装镜像',
+    clientReveal: '打开所在文件夹',
+    clientPage: '发布说明',
+    clientUpToDate: '当前已是最新发布的客户端版本。',
+    clientAvailable: (version) => `可更新到 ${version}。`,
+    clientUnknown: '尚未检查。',
+    clientManual: '当前构建未签名，macOS 不允许客户端自行替换自己。下载完成后把 App 拖进「应用程序」即可——会话与设置都会保留。',
+    clientInstaller: '将运行安装程序并退出客户端，以便它替换自身。',
     versions: 'Harness 版本',
     advanced: '高级',
     log: '日志',
@@ -95,6 +128,7 @@ const COPY = {
     saveHome: '保存并重启',
     autoStart: '打开容器时自动启动后台',
     checkOnLaunch: '启动时检查新的 Harness 版本',
+    checkClientOnLaunch: '启动时检查新的客户端版本',
     bundled: '内置',
     installedBadge: '已安装',
     activeBadge: '运行中',
@@ -177,6 +211,9 @@ const render = (state) => {
   status.dataset.phase = state.phase
 
   el('backend-title').textContent = t.backend
+  el('client-title').textContent = t.client
+  el('client-current-label').textContent = t.clientCurrent
+  el('client-latest-label').textContent = t.clientLatest
   el('version-title').textContent = t.versions
   el('advanced-title').textContent = t.advanced
   el('log-title').textContent = t.log
@@ -186,12 +223,46 @@ const render = (state) => {
   el('home-label').textContent = t.home
   el('auto-start-label').textContent = t.autoStart
   el('check-on-launch-label').textContent = t.checkOnLaunch
+  el('check-client-on-launch-label').textContent = t.checkClientOnLaunch
+  el('check-client-on-launch').checked = state.checkClientUpdatesOnLaunch
   el('save-home').textContent = t.saveHome
   el('home-shared').textContent = t.homeShared
   el('home-separate').textContent = t.homeSeparate
   el('home-custom-label').textContent = t.homeCustom
   el('home-shared').disabled = state.harnessHomeMode === 'shared'
   el('home-separate').disabled = state.harnessHomeMode === 'separate'
+
+  const client = state.client
+  el('client-current-value').textContent = client.currentVersion
+  el('client-latest-value').textContent = client.latest?.version ?? t.unknown
+  el('client-check').textContent = client.checking ? t.clientChecking : t.clientCheck
+  el('client-check').disabled = client.checking || client.downloading
+  const canDownload = client.available && client.downloadedPath === undefined && !client.downloading
+  el('client-download').textContent = client.downloading ? t.clientDownloading : t.clientDownload
+  el('client-download').disabled = !canDownload
+  el('client-download').hidden = client.available === false
+  el('client-install').textContent = client.installMode === 'installer' ? t.clientInstall : t.clientOpen
+  el('client-install').hidden = client.downloadedPath === undefined
+  el('client-install').disabled = client.downloadedPath === undefined
+  el('client-reveal').textContent = t.clientReveal
+  el('client-reveal').hidden = client.downloadedPath === undefined
+  el('client-page').textContent = t.clientPage
+  el('client-page').hidden = client.latest === undefined
+  // The note describes the state; a failure is reported by the error block below
+  // rather than by replacing the explanation of what this platform can do.
+  const clientNote = el('client-note')
+  const platformHint = client.installMode === 'manual' ? t.clientManual : t.clientInstaller
+  if (client.available) clientNote.textContent = `${t.clientAvailable(client.latest?.version ?? '')} ${platformHint}`
+  else if (client.latest === undefined) clientNote.textContent = t.clientUnknown
+  else clientNote.textContent = t.clientUpToDate
+  if (client.downloadedPath !== undefined) clientNote.textContent = `${clientNote.textContent} ${platformHint}`
+  const clientProgress = el('client-progress')
+  clientProgress.hidden = !client.downloading
+  const fill = clientProgress.firstElementChild
+  if (fill !== null) fill.style.width = client.progress === undefined ? '35%' : `${Math.round(client.progress * 100)}%`
+  const clientError = el('client-error')
+  clientError.hidden = client.error === undefined
+  clientError.textContent = client.error ?? ''
 
   const ready = state.phase === 'ready'
   const busy = state.phase === 'installing' || state.phase === 'starting' || state.phase === 'checking'
@@ -287,6 +358,11 @@ el('copy-log').addEventListener('click', () => {
     setTransient('log copied')
   })
 })
+el('client-check').addEventListener('click', () => { void call(() => window.container.checkClientUpdate()) })
+el('client-download').addEventListener('click', () => { void call(() => window.container.downloadClientUpdate()) })
+el('client-install').addEventListener('click', () => { void call(() => window.container.installClientUpdate()) })
+el('client-reveal').addEventListener('click', () => { void call(() => window.container.revealClientUpdate()) })
+el('client-page').addEventListener('click', () => { void call(() => window.container.openClientRelease()) })
 el('home-shared').addEventListener('click', () => { void call(() => window.container.setHarnessHome('shared')) })
 el('home-separate').addEventListener('click', () => { void call(() => window.container.setHarnessHome('separate')) })
 el('save-home').addEventListener('click', () => {
@@ -300,6 +376,9 @@ el('auto-start').addEventListener('change', (event) => {
 })
 el('check-on-launch').addEventListener('change', (event) => {
   void call(() => window.container.updateSettings({ checkUpdatesOnLaunch: event.target.checked }))
+})
+el('check-client-on-launch').addEventListener('change', (event) => {
+  void call(() => window.container.updateSettings({ checkClientUpdatesOnLaunch: event.target.checked }))
 })
 
 window.container.subscribe(render)

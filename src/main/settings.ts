@@ -14,6 +14,7 @@ export const defaultSettings = (): ContainerSettings => ({
   port: containerConfig().defaultPort,
   autoStart: true,
   checkUpdatesOnLaunch: true,
+  checkClientUpdatesOnLaunch: true,
 })
 
 let cache: ContainerSettings | undefined

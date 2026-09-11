@@ -8,6 +8,7 @@
  * @module main
  */
 
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, Menu, nativeTheme, shell } from 'electron'
 import { followSystemAppearance } from './appearance.ts'
@@ -51,8 +52,14 @@ if (forcedTheme === 'dark' || forcedTheme === 'light') nativeTheme.themeSource =
 // versions and settings live would silently look like data loss.
 app.setPath('userData', smokeUserData ?? join(app.getPath('appData'), containerConfig().dataDirectory))
 
-// An automated run must never share state with a real one.
-if (smokeUserData !== undefined) overridePaths({ userData: smokeUserData })
+// An automated run must never share state with a real one, and that includes
+// where it writes a downloaded update.
+if (smokeUserData !== undefined) {
+  const downloads = join(smokeUserData, 'downloads')
+  mkdirSync(downloads, { recursive: true })
+  app.setPath('downloads', downloads)
+  overridePaths({ userData: smokeUserData })
+}
 
 // A container is one window set per user: two copies would fight over the same
 // harness home and the same package directory.
@@ -104,6 +111,7 @@ if (!smoke && !app.requestSingleInstanceLock()) {
         launchMs,
         ...(install === undefined ? {} : { install }),
         ...(homeMode === undefined ? {} : { homeMode }),
+        ...(has('--smoke-client-update') ? { clientUpdate: true } : {}),
       })
       app.quit()
     }

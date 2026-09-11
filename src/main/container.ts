@@ -487,41 +487,44 @@ export class Container {
 
   /**
    * Download the offered release.
+   *
+   * Deliberately not serialized with the harness operations: a 200 MB transfer
+   * must not make "restart the backend" appear to hang. Installing stays queued,
+   * because it ends the process.
    * @returns Completion once the file is ready to apply.
    */
-  downloadClientUpdate(): Promise<void> {
-    return this.enqueue(async () => {
-      const release = this.offeredRelease
-      if (release === undefined) {
-        this.patchClient({ error: 'no release has been resolved yet' })
-        return
-      }
-      if (release.asset === undefined) {
-        this.patchClient({ error: `release ${release.tag} has no build for ${process.platform}-${process.arch}` })
-        return
-      }
-      this.clientAbort = new AbortController()
-      this.patchClient({ downloading: true, progress: 0, error: undefined, downloadedPath: undefined })
-      this.log.push('client', `downloading ${release.asset.name}`)
-      try {
-        const file = await downloadRelease(
-          release,
-          (received, total) => {
-            this.patchClient({ progress: total > 0 ? Math.min(1, received / total) : undefined })
-          },
-          this.clientAbort.signal,
-        )
-        const size = sizeOf(file)
-        this.patchClient({ downloading: false, progress: 1, downloadedPath: file })
-        this.log.push('client', `downloaded ${file} (${(size / 1024 / 1024).toFixed(1)} MB)`)
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        this.log.push('client', `download failed: ${message}`)
-        this.patchClient({ downloading: false, progress: undefined, error: message })
-      } finally {
-        this.clientAbort = undefined
-      }
-    })
+  async downloadClientUpdate(): Promise<void> {
+    if (this.state.client.downloading) return
+    const release = this.offeredRelease
+    if (release === undefined) {
+      this.patchClient({ error: 'no release has been resolved yet' })
+      return
+    }
+    if (release.asset === undefined) {
+      this.patchClient({ error: `release ${release.tag} has no build for ${process.platform}-${process.arch}` })
+      return
+    }
+    this.clientAbort = new AbortController()
+    this.patchClient({ downloading: true, progress: 0, error: undefined, downloadedPath: undefined })
+    this.log.push('client', `downloading ${release.asset.name}`)
+    try {
+      const file = await downloadRelease(
+        release,
+        (received, total) => {
+          this.patchClient({ progress: total > 0 ? Math.min(1, received / total) : undefined })
+        },
+        this.clientAbort.signal,
+      )
+      const size = sizeOf(file)
+      this.patchClient({ downloading: false, progress: 1, downloadedPath: file })
+      this.log.push('client', `downloaded ${file} (${(size / 1024 / 1024).toFixed(1)} MB)`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.log.push('client', `download failed: ${message}`)
+      this.patchClient({ downloading: false, progress: undefined, error: message })
+    } finally {
+      this.clientAbort = undefined
+    }
   }
 
   /**

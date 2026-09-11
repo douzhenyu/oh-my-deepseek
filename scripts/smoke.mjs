@@ -17,9 +17,9 @@
  *   npm run smoke -- --notifications         # exercise the completion notification
  */
 
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { at, config } from './lib/config.mjs'
 
 /** How long the whole automated launch may take. */
@@ -178,6 +178,24 @@ if (!existsSync(reportPath)) {
   process.exit(1)
 }
 const report = JSON.parse(readFileSync(reportPath, 'utf8'))
+
+if (binaryPath !== undefined && process.platform === 'darwin') {
+  // Electron 42 moved macOS notifications to UNNotification, which refuses to
+  // display anything from a bundle whose signature it will not accept. The
+  // Electron distribution's own linker-signed signature is one of those, so the
+  // packaged application has to be re-signed with its own identifier.
+  const bundle = resolve(binaryPath, '..', '..', '..')
+  // codesign reports on stderr, which execFileSync does not return.
+  const described = spawnSync('codesign', ['-dv', bundle], { encoding: 'utf8' })
+  const details = `${described.stdout ?? ''}${described.stderr ?? ''}`
+  const identifier = /Identifier=(\S+)/.exec(details)?.[1]
+  const flags = /flags=(\S+)/.exec(details)?.[1] ?? ''
+  check(
+    'the packaged application is signed the way the notification API requires',
+    identifier === config.appId && flags.includes('adhoc') && !flags.includes('linker-signed'),
+    identifier === undefined ? 'no signature on the bundle' : `identifier=${identifier} flags=${flags}`,
+  )
+}
 
 console.log('\nverification')
 check('the container reached the ready phase', report.ok === true, report.error ?? '')

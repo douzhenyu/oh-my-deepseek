@@ -86,6 +86,16 @@ DeepSeek Harness（`dsh`）的**跨平台桌面客户端容器**：把 harness �
 
 共用数据目录时，命令行 dsh 的对话也会被一并监听并提醒（因为日志在同一份 home 下）；想只监听客户端自己的对话，就切到独立数据目录。
 
+> **为什么 macOS 上必须签名才能弹通知**
+>
+> Electron 42 起，macOS 通知从废弃的 `NSUserNotification` 改为 [`UNNotification`](https://www.electronjs.org/blog/electron-42-0)，后者**拒绝显示任何来自未签名应用的通知**。而且失败是**静默**的：`Notification.isSupported()` 照样返回 `true`，`show()` 不报错，只有 `failed` 事件里才有原因（`UNErrorDomain error 1`）。
+>
+> 更隐蔽的是，Electron 发行版**自带**的签名也不满足要求——它是链接器打的 `flags=0x20002(adhoc,linker-signed)`、identifier 为 `Electron`，`UNNotification` 不接受这一类。
+>
+> 所以打包流程在没有真实证书时，会用**应用自己的 identifier 做一次 ad-hoc 签名**（`flags=0x2(adhoc)`、`Info.plist` 被绑定、资源被封印）。这不是美化：不做这一步，通知在这台机器上**永远不会出现**，而且设置里也找不到这个应用。`npm run smoke --binary ...` 会断言产物的签名形态。
+>
+> 容器也会监听 `failed` 事件并把原因写进日志——否则"系统拒绝了"和"用户没看见"在日志里长得一模一样，这次就是踩了这个坑才查了半天。
+
 ### 客户端自身的更新
 
 控制台顶部有一张**「客户端」**卡片，管的是**这个客户端本身**的版本，和下面的 Harness 版本互不相干：

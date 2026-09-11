@@ -6,6 +6,12 @@
  * watching is noise — and it belongs to the conversation, not to the client: the
  * title is the conversation's own title so a glance is enough to know which one
  * finished.
+ *
+ * Every notification also reports failure. Since Electron 42 the macOS backend is
+ * `UNNotification`, which refuses to display anything from an unsigned
+ * application and says so only through a `failed` event; `show()` returns nothing
+ * and `isSupported()` stays true regardless. Without this listener a misconfigured
+ * build is indistinguishable from a working one that the user happened to miss.
  * @module main/notifications
  */
 
@@ -27,6 +33,27 @@ export const notificationsSupported = (): boolean => Notification.isSupported()
  */
 export const shouldNotify = (options: { focused: boolean; enabled: boolean }): boolean =>
   options.enabled && !options.focused && notificationsSupported()
+
+/** What the caller wants to know about a notification's fate. */
+export interface NoticeHandlers {
+  /** The user activated the notification. */
+  onClick: () => void
+  /** The platform refused to display it, with the reason it gave. */
+  onFailed?: (reason: string) => void
+}
+
+/**
+ * Attach the click and failure handlers every notification needs.
+ * @param notification - The notification about to be shown.
+ * @param handlers - Callbacks supplied by the caller.
+ */
+const wire = <T extends Notification>(notification: T, handlers: NoticeHandlers): T => {
+  notification.on('click', handlers.onClick)
+  notification.on('failed', (_event, error) => {
+    handlers.onFailed?.(error === undefined ? 'the platform gave no reason' : String(error))
+  })
+  return notification
+}
 
 /** How a completion notification is presented. */
 export interface CompletionNotice {
@@ -58,11 +85,12 @@ export const completionNotice = (completion: TurnCompletion, body: string): Comp
  * @param onClick - Invoked when the user activates the notification.
  * @returns Whether the platform accepted the notification.
  */
-export const showTest = (body: string, onClick: () => void): boolean => {
-  if (!notificationsSupported()) return false
-  const notification = new Notification({ title: containerConfig().productName, body, silent: false })
-  notification.on('click', onClick)
-  notification.show()
+export const showTest = (body: string, handlers: NoticeHandlers): boolean => {
+  if (!notificationsSupported()) {
+    handlers.onFailed?.('Notification.isSupported() is false on this system')
+    return false
+  }
+  wire(new Notification({ title: containerConfig().productName, body, silent: false }), handlers).show()
   return true
 }
 
@@ -70,12 +98,13 @@ export const showTest = (body: string, onClick: () => void): boolean => {
  * Show a completion notification.
  * @param completion - The turn that finished.
  * @param body - Localized summary line.
- * @param onClick - Invoked when the user activates the notification.
+ * @param handlers - Click and failure callbacks.
  */
-export const showCompletion = (completion: TurnCompletion, body: string, onClick: () => void): void => {
-  if (!notificationsSupported()) return
+export const showCompletion = (completion: TurnCompletion, body: string, handlers: NoticeHandlers): void => {
+  if (!notificationsSupported()) {
+    handlers.onFailed?.('Notification.isSupported() is false on this system')
+    return
+  }
   const notice = completionNotice(completion, body)
-  const notification = new Notification({ title: notice.title, body: notice.body, silent: false })
-  notification.on('click', onClick)
-  notification.show()
+  wire(new Notification({ title: notice.title, body: notice.body, silent: false }), handlers).show()
 }

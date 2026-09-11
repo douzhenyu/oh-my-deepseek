@@ -7,6 +7,7 @@
  * a Windows installer.
  */
 
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -100,6 +101,41 @@ const verifyResources = async (context) => {
 const wantsSignature = process.env.OHMYDSH_MAC_IDENTITY !== undefined || process.env.CSC_LINK !== undefined
 
 /**
+ * Ad-hoc sign the packaged application when no real identity was supplied.
+ *
+ * This is not cosmetic. Electron 42 moved macOS notifications to the
+ * `UNNotification` API, which refuses to display anything from an unsigned
+ * application and reports the refusal only through a `failed` event — so an
+ * unsigned build looks fine and silently shows nothing, and macOS never lists the
+ * app under Notifications settings.
+ *
+ * The Electron distribution's own signature cannot satisfy this: it is
+ * `flags=0x20002(adhoc,linker-signed)` with the identifier `Electron`, applied by
+ * the linker rather than by a signing identity, and `UNNotification` rejects it.
+ * Re-signing ad-hoc with this application's own identifier drops the
+ * `linker-signed` flag and makes the bundle verify.
+ */
+const adhocSign = (context) => {
+  if (context.electronPlatformName !== 'darwin') return
+  const appPath = join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`)
+  execFileSync('codesign', ['--force', '--sign', '-', '--identifier', config.appId, appPath], { stdio: 'inherit' })
+  const describe = execFileSync('codesign', ['-dv', appPath], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  console.log(`adhoc-signed ${appPath}\n${describe.trim()}`)
+  execFileSync('codesign', ['--verify', '--strict', appPath], { stdio: 'inherit' })
+  console.log('the bundled application verifies against its own signature')
+}
+
+/**
+ * Everything that has to happen to the packed application before it is signed
+ * into installers: prove the resources are all there, then sign it.
+ */
+const packageApplication = async (context) => {
+  await verifyResources(context)
+  // A real identity is electron-builder's job; it signs after this hook.
+  if (!wantsSignature) adhocSign(context)
+}
+
+/**
  * Whether notarization credentials were supplied as well.
  *
  * Signing alone is not enough on macOS 10.15+: a signed but un-notarized app is
@@ -132,7 +168,7 @@ export default {
   // build land beside, rather than on top of, an installed copy that may be
   // running. The target id is always appended so both layouts are identical.
   directories: { output: `${process.env.OHMYDSH_OUTPUT_DIR ?? '.build'}/${targetId}` },
-  afterPack: verifyResources,
+  afterPack: packageApplication,
   mac: {
     category: 'public.app-category.developer-tools',
     target: ['dmg', 'zip'],

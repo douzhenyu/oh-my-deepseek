@@ -93,8 +93,15 @@ if (!smoke && !app.requestSingleInstanceLock()) {
     registerIpc(active, {
       openHarness: () => { windows?.focusHarness() },
       testNotification: () => {
-        const shown = showTest(strings().turnCompleteTest, () => { windows?.focusHarness() })
-        log.push('notify', shown ? 'test notification raised from the console' : 'the platform does not support notifications')
+        const shown = showTest(strings().turnCompleteTest, {
+          onClick: () => { windows?.focusHarness() },
+          onFailed: (reason) => {
+            // A silent refusal is the whole failure mode here, so it is logged
+            // rather than swallowed.
+            log.push('notify', `test notification refused by the system: ${reason}`)
+          },
+        })
+        log.push('notify', shown ? 'test notification submitted to the system' : 'the platform does not support notifications')
         return shown
       },
     })
@@ -123,7 +130,13 @@ if (!smoke && !app.requestSingleInstanceLock()) {
             (enabled ? (focused ? 'window was focused, so nothing was raised' : 'raising a notification') : 'notifications are switched off'),
         )
         if (!shouldNotify({ focused, enabled })) return
-        showCompletion(completion, strings().turnComplete, () => { windows?.focusHarness() })
+        showCompletion(completion, strings().turnComplete, {
+          onClick: () => { windows?.focusHarness() },
+          onFailed: (reason) => {
+            log.push('notify', `the system refused the notification: ${reason}`)
+            log.push('notify', 'on macOS this means the app is unsigned: UNNotification will not display anything from a bundle without a valid signature')
+          },
+        })
       },
     })
     watcher.start()

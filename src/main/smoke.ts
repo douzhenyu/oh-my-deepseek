@@ -35,6 +35,29 @@ interface ConsoleProbe {
   status: string
 }
 
+/** What the console window reports about its own appearance. */
+interface AppearanceProbe {
+  /** Whether the system is asking for a dark interface. */
+  dark: boolean
+  /** The console's computed body background. */
+  background: string
+}
+
+/**
+ * Perceived luminance of a CSS `rgb(...)` colour, used to check that the console
+ * agrees with the system scheme without pinning exact palette values.
+ * @param color - A computed CSS colour.
+ * @returns 0-255 luminance, or `NaN` when the value is not a colour.
+ */
+const luminance = (color: string): number => {
+  const inner = /rgba?\(([^)]+)\)/.exec(color)?.[1]
+  if (inner === undefined) return Number.NaN
+  const channels = inner.split(',').map((value) => Number(value.trim()))
+  const [red = Number.NaN, green = Number.NaN, blue = Number.NaN] = channels
+  if ([red, green, blue].some((channel) => Number.isNaN(channel))) return Number.NaN
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+}
+
 /** Result of the automated run. */
 export interface SmokeReport {
   ok: boolean
@@ -46,6 +69,7 @@ export interface SmokeReport {
   mainPid: number
   page?: PageProbe
   console?: ConsoleProbe
+  consoleAppearance?: AppearanceProbe
   http?: { rootWithoutCookie: number; tokenHandoff: number }
   launchMs: number
   home?: {
@@ -264,6 +288,16 @@ export const runSmoke = async (
     if (http.rootWithoutCookie !== 401) throw new Error(`an unauthenticated request returned ${String(http.rootWithoutCookie)}, expected 401`)
     if (http.tokenHandoff !== 303) throw new Error(`the token hand-off returned ${String(http.tokenHandoff)}, expected 303`)
     if (page.title.trim() === '') throw new Error('the Harness page has no title')
+    // The client chrome must follow the operating system's scheme: a dark panel
+    // under a light menu bar was the reported defect.
+    const appearance = await windows.evaluateConsole<AppearanceProbe>(
+      "({ dark: matchMedia('(prefers-color-scheme: dark)').matches, background: getComputedStyle(document.body).backgroundColor })",
+    )
+    report.consoleAppearance = appearance
+    const value = luminance(appearance.background)
+    if (Number.isNaN(value)) throw new Error(`the console background is not a colour: ${appearance.background}`)
+    if (appearance.dark && value > 96) throw new Error(`the system is dark but the console renders a light background (${appearance.background})`)
+    if (!appearance.dark && value < 160) throw new Error(`the system is light but the console renders a dark background (${appearance.background})`)
     if (options.homeMode !== undefined) report.home = await switchHome(container, windows, options.homeMode)
     if (options.install !== undefined) report.install = await installAndSwitch(container, windows, options.install)
     report.ok = report.install === undefined || report.install.ok

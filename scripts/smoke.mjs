@@ -12,6 +12,7 @@
  *   npm run smoke -- --keep                  # reuse the previous run's user data
  *   npm run smoke -- --binary "<app binary>" # verify a packaged application
  *   npm run smoke -- --home separate         # verify the independent harness home
+ *   npm run smoke -- --theme dark            # verify the other colour scheme
  */
 
 import { execFileSync, spawn } from 'node:child_process'
@@ -31,6 +32,7 @@ const binaryPath = optionValue('--binary')
 
 const installVersion = optionValue('--install')
 const homeMode = optionValue('--home')
+const forcedTheme = optionValue('--theme')
 
 const keep = process.argv.includes('--keep')
 
@@ -142,6 +144,7 @@ const child = spawn(electron, [
   userData,
   ...(installVersion === undefined ? [] : ['--smoke-install', installVersion]),
   ...(homeMode === undefined ? [] : ['--smoke-home-mode', homeMode]),
+  ...(forcedTheme === undefined ? [] : ['--smoke-theme', forcedTheme]),
 ], {
   cwd: at('.'),
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -173,6 +176,11 @@ const report = JSON.parse(readFileSync(reportPath, 'utf8'))
 console.log('\nverification')
 check('the container reached the ready phase', report.ok === true, report.error ?? '')
 check('the console window rendered through the preload bridge', report.console?.ready === true, JSON.stringify(report.console ?? {}))
+check(
+  'the console follows the system light/dark setting',
+  report.consoleAppearance !== undefined,
+  report.consoleAppearance === undefined ? 'no appearance was probed' : `${report.consoleAppearance.dark ? 'dark' : 'light'} system -> ${report.consoleAppearance.background}`,
+)
 check(`the console is branded "${config.productName}"`, report.console?.heading === config.productName, report.console?.heading ?? '')
 check('the Harness page booted', report.page !== undefined && report.page.mode !== 'queue', JSON.stringify(report.page ?? {}))
 check('unauthenticated requests are rejected', report.http?.rootWithoutCookie === 401, `status ${String(report.http?.rootWithoutCookie)}`)

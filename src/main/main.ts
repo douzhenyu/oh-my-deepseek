@@ -9,7 +9,8 @@
  */
 
 import { join } from 'node:path'
-import { app, Menu, shell } from 'electron'
+import { app, Menu, nativeTheme, shell } from 'electron'
+import { followSystemAppearance } from './appearance.ts'
 import { containerConfig } from './config.ts'
 import { Container } from './container.ts'
 import { registerIpc } from './ipc.ts'
@@ -38,6 +39,12 @@ const smoke = smokeReport !== undefined
 const smokeUserData = value('--smoke-user-data')
 
 app.setName(containerConfig().productName)
+// The client chrome follows the operating system's light/dark setting. An
+// automated run can force one scheme, because a machine only ever exercises one
+// of the two palettes.
+followSystemAppearance()
+const forcedTheme = value('--smoke-theme')
+if (forcedTheme === 'dark' || forcedTheme === 'light') nativeTheme.themeSource = forcedTheme
 
 // User data lives in a directory named for the product, not for the current
 // brand: the displayed name is free to change, but moving where a user's harness

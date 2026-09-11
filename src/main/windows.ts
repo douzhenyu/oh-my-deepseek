@@ -9,7 +9,8 @@
  */
 
 import { join } from 'node:path'
-import { BrowserWindow, shell } from 'electron'
+import { BrowserWindow, nativeTheme, shell } from 'electron'
+import { consoleBackground } from './appearance.ts'
 import { containerConfig } from './config.ts'
 import { strings } from './locale.ts'
 import { paths } from './paths.ts'
@@ -24,7 +25,19 @@ export class WindowManager {
    * @param options - `headless` creates windows without ever showing them, which
    *   is what an automated smoke run needs.
    */
-  constructor(private readonly options: { headless: boolean } = { headless: false }) {}
+  constructor(private readonly options: { headless: boolean } = { headless: false }) {
+    // A window already on screen keeps its old background unless it is told; the
+    // system scheme can flip at any time while the container is open.
+    nativeTheme.on('updated', () => { this.applyAppearance() })
+  }
+
+  /** Repaint both windows for the current system scheme. */
+  private applyAppearance(): void {
+    const background = consoleBackground()
+    for (const window of [this.consoleWindow, this.harnessWindow]) {
+      if (window !== undefined && !window.isDestroyed()) window.setBackgroundColor(background)
+    }
+  }
 
   /** Whether a console window is open. */
   get consoleOpen(): boolean {
@@ -58,7 +71,7 @@ export class WindowManager {
       minWidth: 720,
       minHeight: 560,
       title: `${containerConfig().productName} — ${strings().consoleTitle}`,
-      backgroundColor: '#0d1117',
+      backgroundColor: consoleBackground(),
       show: false,
       autoHideMenuBar: process.platform !== 'darwin',
       webPreferences: {
@@ -102,7 +115,7 @@ export class WindowManager {
       minWidth: 900,
       minHeight: 600,
       title: containerConfig().productName,
-      backgroundColor: '#0d1117',
+      backgroundColor: consoleBackground(),
       show: false,
       autoHideMenuBar: process.platform !== 'darwin',
       webPreferences: {

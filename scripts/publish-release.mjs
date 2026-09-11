@@ -175,7 +175,17 @@ if (dryRun) {
   process.exit(0)
 }
 
-if (process.argv.includes('--metadata')) await applyMetadata()
+if (process.argv.includes('--metadata')) {
+  try {
+    await applyMetadata()
+  } catch (error) {
+    // Editing repository settings is a different permission from publishing
+    // content: a token scoped to contents returns 404 here. Publishing the
+    // release must not depend on it.
+    console.warn(`could not update repository metadata: ${error instanceof Error ? error.message : String(error)}`)
+    console.warn('set the description and topics in the repository settings, or grant the token Administration: Read and write')
+  }
+}
 
 const selected = requested.length === 0 ? RELEASES : RELEASES.filter((release) => requested.includes(release.tag))
 if (selected.length === 0) throw new Error(`unknown tag; expected one of ${RELEASES.map((release) => release.tag).join(', ')}`)

@@ -190,7 +190,11 @@ check('unauthenticated requests are rejected', report.http?.rootWithoutCookie ==
 check('the one-time token URL is honoured', report.http?.tokenHandoff === 303, `status ${String(report.http?.tokenHandoff)}`)
 if (clientUpdate) {
   const update = report.clientUpdate
-  check('the client update check resolved a release', update?.latest !== undefined, update?.error ?? `running ${update?.currentVersion}`)
+  check(
+    'the client update check resolved a release',
+    update?.latest !== undefined,
+    update?.error ?? `running ${update?.currentVersion}, feed has ${update?.latest}, offer=${String(update?.available)}`,
+  )
   const table = update?.comparison
   check(
     'the update offer only fires for a strictly newer release',

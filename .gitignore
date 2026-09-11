@@ -1,8 +1,14 @@
+# Dependencies, matched at any depth so a nested node_modules is covered too.
 node_modules/
-lib/
-.build/
-.smoke/
-resources/node/
-resources/dsh-seed/
+
+# Generated output and local state. These are anchored to the repository root:
+# an unanchored `lib/` also matches `scripts/lib/`, which silently kept the
+# build scripts' own helpers out of the repository.
+/lib/
+/.build/
+/.smoke/
+/resources/node/
+/resources/dsh-seed/
+
 *.log
 .DS_Store

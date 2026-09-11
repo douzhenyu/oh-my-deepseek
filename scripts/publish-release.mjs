@@ -29,6 +29,16 @@ import { at } from './lib/config.mjs'
 /** Published version, taken from the manifest electron-builder names artifacts after. */
 const version = JSON.parse(readFileSync(at('package.json'), 'utf8')).version
 
+/**
+ * Root the artifacts were built under. `npm run release` reads the default
+ * `.build`; `OHMYDSH_BUILD_DIR` selects a release built elsewhere so it does not
+ * have to overwrite an installed copy.
+ */
+const buildRoot = process.env.OHMYDSH_BUILD_DIR ?? '.build'
+
+/** Where one target's artifacts were written: the build root plus the target id. */
+const artifactDirectory = (targetId) => `${buildRoot}/${targetId}`
+
 /** Owner and repository the releases are published to. */
 const OWNER = 'douzhenyu'
 const REPO = 'oh-my-deepseek'
@@ -50,9 +60,9 @@ const RELEASES = [
     name: `oh-my-deepseek ${version}`,
     notes: `release-notes/v${version}.md`,
     artifacts: [
-      `.build/mac-arm64/oh-my-deepseek-${version}-mac-arm64.dmg`,
-      `.build/mac-arm64/oh-my-deepseek-${version}-mac-arm64.zip`,
-      `.build/win-x64/oh-my-deepseek-${version}-win-x64.exe`,
+      `${artifactDirectory('mac-arm64')}/oh-my-deepseek-${version}-mac-arm64.dmg`,
+      `${artifactDirectory('mac-arm64')}/oh-my-deepseek-${version}-mac-arm64.zip`,
+      `${artifactDirectory('win-x64')}/oh-my-deepseek-${version}-win-x64.exe`,
     ],
   },
 ]

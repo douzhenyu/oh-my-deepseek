@@ -24,6 +24,7 @@ if (target === undefined) {
   throw new Error(`specify a target: ${Object.keys(TARGETS).join(', ')} (or run on a supported host)`)
 }
 
+const outputRoot = process.env.OHMYDSH_OUTPUT_DIR ?? `.build/${target.id}`
 const directoryOnly = argv.includes('--dir')
 const host = hostTarget()
 const sameHost = host !== undefined && host.platform === target.platform && host.arch === target.arch
@@ -62,4 +63,4 @@ if (process.env.OHMYDSH_MAC_IDENTITY === undefined && process.env.CSC_LINK === u
 }
 
 await run(builder, args, { OHMYDSH_TARGET: target.id })
-console.log(`${target.label}: artifacts in .build/${target.id}/`)
+console.log(`${target.label}: artifacts in ${outputRoot}/`)

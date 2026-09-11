@@ -104,7 +104,10 @@ export default {
   asar: true,
   files: ['lib/**/*', 'package.json', 'container.config.json'],
   extraResources,
-  directories: { output: `.build/${targetId}` },
+  // The build root defaults to `.build`; `OHMYDSH_OUTPUT_DIR` lets a release
+  // build land beside, rather than on top of, an installed copy that may be
+  // running. The target id is always appended so both layouts are identical.
+  directories: { output: `${process.env.OHMYDSH_OUTPUT_DIR ?? '.build'}/${targetId}` },
   afterPack: verifyResources,
   mac: {
     category: 'public.app-category.developer-tools',

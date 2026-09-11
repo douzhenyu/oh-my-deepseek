@@ -60,6 +60,12 @@ const args = [platformFlag, archFlag, '--config', 'electron-builder.config.mjs',
 // A signature is only attempted when the caller supplied identity material.
 if (process.env.OHMYDSH_MAC_IDENTITY === undefined && process.env.CSC_LINK === undefined) {
   process.env.CSC_IDENTITY_AUTO_DISCOVERY = 'false'
+} else if (process.env.OHMYDSH_MAC_IDENTITY !== undefined && process.env.CSC_NAME === undefined) {
+  // electron-builder selects a keychain identity through CSC_NAME, and it rejects
+  // the "Developer ID Application: " prefix that Keychain displays, so the
+  // project's own variable is translated rather than merely treated as a flag.
+  process.env.CSC_NAME = process.env.OHMYDSH_MAC_IDENTITY.replace(/^Developer ID Application:\s*/, '')
+  console.log(`packaging with keychain identity "${process.env.CSC_NAME}"`)
 }
 
 await run(builder, args, { OHMYDSH_TARGET: target.id })

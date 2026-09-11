@@ -228,7 +228,7 @@ npm run package:win:x64        # 需在 Windows x64 上执行
 - **Node 运行时可以跨平台准备**：Windows 的 `node.exe` 在 mac 上照样下载、校验 SHA-256、用 `unzip`/`ditto` 解压（已验证）。
 - **dsh seed 不能跨平台**：里面含平台相关原生模块（node-pty 等）。`prepare-seed` 会把平台写入 `resources/dsh-seed/seed.json`，打包时**只有平台匹配才纳入**，否则明确告警并排除。这不是防御性猜测——第一次跨平台打包时 mac 的 seed 真的被打进了 Windows 安装包，这个标记就是为此加的。
 - 不含 seed 的产物不是残缺品：应用首次启动会用内置 npm 安装 `dshSeedVersion`，只是需要一次联网（约 30s）。
-- 默认**不签名**（`CSC_IDENTITY_AUTO_DISCOVERY=false`）。需要签名时提供 `OHMYDSH_MAC_IDENTITY` 或标准 `CSC_LINK`，配置会自动打开 hardened runtime；Windows 签名沿用 electron-builder 的常规输入。
+- 默认**不签名**（`CSC_IDENTITY_AUTO_DISCOVERY=false`）。签名与公证见下节；Windows 签名沿用 electron-builder 的常规输入。
 - 打包有**资源校验门**（`afterPack`）：校验 supervisor、内置 Node、seed CLI 入口存在，且 seed 文件数不少于源目录。资源映射失败是静默的——不校验就会打包成功、到用户机器上才炸。实测就在这一步抓到过 seed 只复制了 2 个文件的问题。
 
 ### 图标与品牌
@@ -246,6 +246,52 @@ npm run icons      # icon-source.svg -> build/icon.icns / icon.png
 > 品牌提示：DeepSeek 的[品牌资产使用规范](https://github.com/deepseek-ai/deepseek-harness/blob/main/BRAND_GUIDELINES.md)建议项目名不要直接使用 "DeepSeek Harness" 商标、推荐用 "DSH" 缩写，并避免让人误以为获得官方背书。个人自用没问题；若要对外分发，建议核对这份规范。
 
 ---
+
+### macOS 签名与公证
+
+**未签名的包能用，但每次都要用户右键→打开，而且无法静默自更新。** 要彻底解决，需要 Apple 的**付费**开发者账号：
+
+| 需要什么 | 说明 |
+| --- | --- |
+| Apple Developer Program 会员 | **99 美元/年**（各地区价格不同；非营利组织、认证教育机构、政府机构可[申请豁免](https://developer.apple.com/support/fee-waiver/)） |
+| **Developer ID Application** 证书 | 直接分发（dmg/zip）用这一种，不是 "Apple Distribution"（那是 Mac App Store 用的） |
+| 公证凭据 | Apple ID + App 专用密码，或 App Store Connect API Key |
+| Hardened Runtime + entitlements | 已在 `build/entitlements.*.plist` 里配好（Electron 的 V8 需要 JIT 相关授权，缺了会"公证通过但一启动就崩"） |
+
+个人注册需要：开启双重认证的 Apple Account、法定姓名（用昵称/公司名会拖慢审核）、真实地址与电话。组织注册额外需要 **D-U-N-S 编号**、企业域名邮箱、可访问的官网。
+
+拿到证书后：
+
+```sh
+# 方式一：证书已在钥匙串里（名字可从「钥匙串访问」复制，前缀会被自动去掉）
+export OHMYDSH_MAC_IDENTITY='Developer ID Application: Your Name (TEAMID)'
+# 方式二：直接给 .p12（CI 里通常是 base64）
+export CSC_LINK=/path/to/cert.p12 CSC_KEY_PASSWORD='...'
+
+# 公证凭据（三选一，给了才会开启公证）
+export APPLE_ID='you@example.com' APPLE_APP_SPECIFIC_PASSWORD='xxxx-xxxx-xxxx-xxxx' APPLE_TEAM_ID='TEAMID'
+# 或 export APPLE_API_KEY=<base64 p8> APPLE_API_KEY_ID=... APPLE_API_ISSUER=...
+# 或 export APPLE_KEYCHAIN_PROFILE=...
+
+# 让缺少凭据时直接失败，而不是静默产出未签名的包（CI 里建议开）
+export OHMYDSH_REQUIRE_SIGNING=1
+
+npm run package:mac:arm64
+```
+
+构建会打印它实际采用的签名与公证决定，例如
+`electron-builder: signing with the CSC_LINK certificate; notarization DISABLED (no APPLE_ID, ...)`。
+
+验证产物：
+
+```sh
+spctl --assess --verbose --type exec "/path/Oh my deepseek!.app"   # 期望 accepted / Notarized Developer ID
+xcrun stapler validate "/path/Oh my deepseek!.app"                 # 期望 The validate action worked!
+```
+
+> ⚠️ **还有一个已知缺口：嵌套二进制尚未签名。** 安装包里有 16 个 Mach-O 可执行文件在 `extraResources` 里——内置 Node 运行时本身（1 个）、dsh seed 里的原生模块（12 个 `.node`）与其它可执行文件（3 个）。公证要求**包里每一个可执行文件**都用同一张 Developer ID 签名并启用 hardened runtime，否则公证会以 "The executable does not have the Hardened Runtime enabled" 之类的错误被拒。
+>
+> 官方的 `apps/desktop` 是在**打包前**就对运行时里的原生文件逐个签名，并用 `signIgnore` 让 electron-builder 不要重复签。本项目还没有做这一步——所以现在拿到证书后，**大概率会在公证环节被拒**，而不是签出可用的包。这一步需要真实证书才能验证，等你有证书时告诉我，我按官方那套接上并实测。
 
 ## 6. 验证
 

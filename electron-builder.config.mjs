@@ -93,11 +93,35 @@ const verifyResources = async (context) => {
   }
 }
 
+/**
+ * Whether the caller supplied signing material. Either electron-builder's own
+ * `CSC_LINK` or this project's `OHMYDSH_MAC_IDENTITY` turns signing on.
+ */
 const wantsSignature = process.env.OHMYDSH_MAC_IDENTITY !== undefined || process.env.CSC_LINK !== undefined
+
+/**
+ * Whether notarization credentials were supplied as well.
+ *
+ * Signing alone is not enough on macOS 10.15+: a signed but un-notarized app is
+ * still blocked by Gatekeeper. Any one of the three documented credential
+ * strategies enables it, and the notarization step then also staples the ticket
+ * so the app verifies offline.
+ */
+const wantsNotarization = wantsSignature
+  && (process.env.APPLE_ID !== undefined
+    || process.env.APPLE_API_KEY !== undefined
+    || process.env.APPLE_KEYCHAIN_PROFILE !== undefined)
+
+if (wantsSignature) {
+  console.log(`electron-builder: signing with ${process.env.OHMYDSH_MAC_IDENTITY ?? 'the CSC_LINK certificate'}; notarization ${wantsNotarization ? 'enabled' : 'DISABLED (no APPLE_ID, APPLE_API_KEY, or APPLE_KEYCHAIN_PROFILE)'}`)
+}
 
 export default {
   appId: config.appId,
   productName: config.productName,
+  // Opt-in, so a release job fails instead of quietly uploading an unsigned
+  // build when its signing secrets are missing.
+  forceCodeSigning: process.env.OHMYDSH_REQUIRE_SIGNING === '1',
   // The brand carries punctuation that is awkward in file names and NSIS
   // scripts, so artifacts use a plain technical name.
   artifactName: 'oh-my-deepseek-${version}-${os}-${arch}.${ext}',
@@ -116,8 +140,16 @@ export default {
     // the standard electron-builder identity inputs.
     identity: wantsSignature ? undefined : null,
     hardenedRuntime: wantsSignature,
+    // Hardened runtime without these entitlements notarizes and then crashes on
+    // launch, because Electron's V8 cannot start without them.
+    ...(wantsSignature
+      ? {
+          entitlements: 'build/entitlements.mac.plist',
+          entitlementsInherit: 'build/entitlements.mac.inherit.plist',
+        }
+      : {}),
     gatekeeperAssess: false,
-    notarize: false,
+    notarize: wantsNotarization,
     extendInfo: { CFBundleDisplayName: config.productName },
   },
   dmg: { sign: false },

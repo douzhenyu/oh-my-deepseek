@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Hardened runtime is required for notarization, and it is what makes these
+    entitlements necessary: Electron's V8 needs both the JIT and writable,
+    executable memory to run at all. Signing this application without them
+    produces a bundle that notarizes and then crashes on launch.
+
+    Nothing else is declared because the application is not sandboxed. It talks
+    to a loopback backend it starts itself, which needs no network entitlement,
+    and it never asks for camera, microphone, or location access.
+  -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+</dict>
+</plist>

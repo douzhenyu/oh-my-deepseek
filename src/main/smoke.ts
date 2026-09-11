@@ -10,8 +10,15 @@
  * @module main/smoke
  */
 
-import { rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { app } from 'electron'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { zstdDecompressSync, zstdCompressSync } from 'node:zlib'
 import { isNewer, sizeOf } from './client-update.ts'
+import { CompletionWatcher } from './completion-watch.ts'
+import { notificationsSupported, shouldNotify } from './notifications.ts'
+import { listSessionLogs, scanFrames, type TurnCompletion } from './session-log.ts'
 import { containerConfig } from './config.ts'
 import type { Container } from './container.ts'
 import type { WindowManager } from './windows.ts'
@@ -82,6 +89,20 @@ export interface SmokeReport {
     phase?: string
     backendPid?: number
     returnedToShared?: boolean
+    error?: string
+  }
+  notifications?: {
+    ok: boolean
+    historySuppressed?: boolean
+    detected?: number
+    delegatedIgnored?: boolean
+    title?: string
+    turn?: number
+    sinkCalls?: number
+    supported?: boolean
+    decision?: { focused: boolean; unfocused: boolean; disabled: boolean }
+    realLogFrames?: number
+    realLogDecoded?: number
     error?: string
   }
   clientUpdate?: {
@@ -166,6 +187,91 @@ const probeHttp = async (container: Container): Promise<{ rootWithoutCookie: num
   const unauthorised = await fetch(`http://127.0.0.1:${String(info.port)}/`, { redirect: 'manual' })
   const handoff = await fetch(info.url, { redirect: 'manual' })
   return { rootWithoutCookie: unauthorised.status, tokenHandoff: handoff.status }
+}
+
+/**
+ * Exercise the completion-notification pipeline.
+ *
+ * Three things have to hold, and each is checked separately: a session log that
+ * already contains finished turns must not be reported as news, a turn that ends
+ * after watching starts must be reported once, and a delegated session's turn
+ * must never be reported at all. The frame scanner is also run over a real
+ * session log from the user's own harness home, because the fixtures are written
+ * by this process and would happily agree with a wrong scanner.
+ * @returns The scenario result, never throwing.
+ */
+const exerciseNotifications = (): NonNullable<SmokeReport['notifications']> => {
+  const result: NonNullable<SmokeReport['notifications']> = { ok: false }
+  try {
+    // The isolated user data directory of this run, so the fixture is cleaned up
+    // with everything else.
+    const home = join(app.getPath('userData'), 'notify-fixture')
+    const userLog = join(home, 'sessions', '--fixture--', 'session-user', 'session.v3.jsonl.zstd')
+    const childLog = join(home, 'sessions', '--fixture--', 'session-child', 'session.v3.jsonl.zstd')
+    mkdirSync(dirname(userLog), { recursive: true })
+    mkdirSync(dirname(childLog), { recursive: true })
+    const frame = (event: unknown): Buffer => zstdCompressSync(Buffer.from(`${JSON.stringify(event)}\n`))
+    writeFileSync(userLog, Buffer.concat([
+      frame({ type: 'session', version: 3, id: 'session-user', cwd: '/fixture/project', delegationDepth: 0 }),
+      frame({ type: 'session/title', seq: 1, data: { title: 'Fixture conversation' } }),
+      frame({ type: 'turn/start', seq: 2, data: { turn: 1 } }),
+      frame({ type: 'turn/end', seq: 3, time: 1000, data: { turn: 1, reason: { kind: 'completed' } } }),
+    ]))
+    writeFileSync(childLog, Buffer.concat([
+      frame({ type: 'session', version: 3, id: 'session-child', cwd: '/fixture/project', delegationDepth: 1 }),
+      frame({ type: 'turn/end', seq: 2, time: 1100, data: { turn: 1, reason: { kind: 'completed' } } }),
+    ]))
+
+    const seen: TurnCompletion[] = []
+    const watcher = new CompletionWatcher({ home: () => home, onComplete: (completion) => { seen.push(completion) } })
+    result.historySuppressed = watcher.poll().length === 0
+
+    appendFileSync(userLog, frame({ type: 'turn/end', seq: 9, time: 2000, data: { turn: 2, reason: { kind: 'completed' } } }))
+    const detected = watcher.poll()
+    result.detected = detected.length
+    result.title = detected[0]?.title
+    result.turn = detected[0]?.turn
+
+    appendFileSync(childLog, frame({ type: 'turn/end', seq: 9, time: 2100, data: { turn: 2, reason: { kind: 'completed' } } }))
+    result.delegatedIgnored = watcher.poll().length === 0
+    watcher.stop()
+    result.sinkCalls = seen.length
+    result.supported = notificationsSupported()
+    result.decision = {
+      focused: shouldNotify({ focused: true, enabled: true }),
+      unfocused: shouldNotify({ focused: false, enabled: true }),
+      disabled: shouldNotify({ focused: false, enabled: false }),
+    }
+
+    // Real data: a fixture this process wrote would agree with a broken scanner.
+    const realHome = join(homedir(), '.dsh')
+    const realLogs = existsSync(realHome) ? listSessionLogs(realHome, 1) : []
+    if (realLogs[0] !== undefined) {
+      const buffer = readFileSync(realLogs[0])
+      const scan = scanFrames(buffer)
+      result.realLogFrames = scan.frames.length
+      let decoded = 0
+      for (const range of scan.frames) {
+        zstdDecompressSync(buffer.subarray(range.start, range.end))
+        decoded += 1
+      }
+      result.realLogDecoded = decoded
+    }
+
+    result.ok = result.historySuppressed === true
+      && result.detected === 1
+      && result.delegatedIgnored === true
+      && result.title === 'Fixture conversation'
+      && result.sinkCalls === 1
+      && result.decision.focused === false
+      && result.decision.disabled === false
+      && result.decision.unfocused === result.supported
+      && result.realLogFrames !== undefined
+      && result.realLogFrames === result.realLogDecoded
+  } catch (error) {
+    result.error = error instanceof Error ? `${error.message}` : String(error)
+  }
+  return result
 }
 
 /**
@@ -311,6 +417,7 @@ const installAndSwitch = async (
  * @param reportPath - File to write the JSON report to.
  * @param options - `install` additionally installs a published version and
  *   switches the backend onto it, which is the update path users exercise.
+ * @param options.notifications - Whether to exercise completion notification.
  * @param options.clientUpdate - Whether to exercise the client's own update path.
  * @param options.install - Version to install and activate, when requested.
  * @param options.homeMode - Harness home to switch to, when requested.
@@ -321,7 +428,7 @@ export const runSmoke = async (
   container: Container,
   windows: WindowManager,
   reportPath: string,
-  options: { install?: string; homeMode?: string; clientUpdate?: boolean; launchMs: number },
+  options: { install?: string; homeMode?: string; clientUpdate?: boolean; notifications?: boolean; launchMs: number },
 ): Promise<void> => {
   const started = Date.now()
   const state = container.snapshot()
@@ -366,6 +473,7 @@ export const runSmoke = async (
     if (Number.isNaN(value)) throw new Error(`the console background is not a colour: ${appearance.background}`)
     if (appearance.dark && value > 96) throw new Error(`the system is dark but the console renders a light background (${appearance.background})`)
     if (!appearance.dark && value < 160) throw new Error(`the system is light but the console renders a dark background (${appearance.background})`)
+    if (options.notifications === true) report.notifications = exerciseNotifications()
     if (options.clientUpdate === true) report.clientUpdate = await exerciseClientUpdate(container)
     if (options.homeMode !== undefined) report.home = await switchHome(container, windows, options.homeMode)
     if (options.install !== undefined) report.install = await installAndSwitch(container, windows, options.install)

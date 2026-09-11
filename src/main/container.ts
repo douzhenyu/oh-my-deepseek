@@ -25,7 +25,7 @@ import {
   sizeOf,
   type ClientRelease,
 } from './client-update.ts'
-import { homeForMode, modeOf, seedSeparateHome } from './harness-home.ts'
+import { homeForMode, modeOf, seedSeparateHome, sharedHome } from './harness-home.ts'
 import { strings } from './locale.ts'
 import type { ContainerLog } from './log.ts'
 import { paths } from './paths.ts'
@@ -79,6 +79,7 @@ export class Container {
       autoStart: true,
       checkUpdatesOnLaunch: true,
       checkClientUpdatesOnLaunch: true,
+      notifyOnTurnEnd: true,
       updateAvailable: false,
       client: {
         currentVersion: app.getVersion(),
@@ -114,6 +115,16 @@ export class Container {
   /** Whether the backend process is alive. */
   get backendRunning(): boolean {
     return this.backend.running
+  }
+
+  /**
+   * The harness home the backend is actually using.
+   *
+   * Session logs live under it, so this is what the completion watcher reads.
+   * @returns An absolute path.
+   */
+  harnessHomePath(): string {
+    return this.effectiveHome() ?? sharedHome()
   }
 
   /** Effective harness home, absent when the product default applies. */
@@ -178,6 +189,7 @@ export class Container {
       autoStart: settings.autoStart,
       checkUpdatesOnLaunch: settings.checkUpdatesOnLaunch,
       checkClientUpdatesOnLaunch: settings.checkClientUpdatesOnLaunch,
+      notifyOnTurnEnd: settings.notifyOnTurnEnd,
       dshHome: this.homeLabel(),
       dshHomeOverride: this.effectiveHome() ?? '',
       harnessHomeMode: modeOf(this.effectiveHome()),
@@ -419,6 +431,7 @@ export class Container {
       autoStart: next.autoStart,
       checkUpdatesOnLaunch: next.checkUpdatesOnLaunch,
       checkClientUpdatesOnLaunch: next.checkClientUpdatesOnLaunch,
+      notifyOnTurnEnd: next.notifyOnTurnEnd,
       dshHome: this.homeLabel(),
       dshHomeOverride: this.effectiveHome() ?? '',
       harnessHomeMode: modeOf(this.effectiveHome()),

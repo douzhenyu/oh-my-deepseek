@@ -15,6 +15,7 @@ export const defaultSettings = (): ContainerSettings => ({
   autoStart: true,
   checkUpdatesOnLaunch: true,
   checkClientUpdatesOnLaunch: true,
+  notifyOnTurnEnd: true,
 })
 
 let cache: ContainerSettings | undefined

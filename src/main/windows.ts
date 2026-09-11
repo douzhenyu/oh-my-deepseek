@@ -191,6 +191,14 @@ export class WindowManager {
     return this.consoleWindow.webContents.executeJavaScript(script, true) as Promise<T>
   }
 
+  /**
+   * Whether the user is looking at the Harness window right now.
+   * @returns `true` when it is open and focused.
+   */
+  isHarnessFocused(): boolean {
+    return this.harnessOpen && this.harnessWindow?.isFocused() === true
+  }
+
   /** Focus the Harness window when open. @returns Whether it was focused. */
   focusHarness(): boolean {
     if (!this.harnessOpen) return false

@@ -13,9 +13,12 @@ import { join } from 'node:path'
 import { app, Menu, nativeTheme, shell } from 'electron'
 import { followSystemAppearance } from './appearance.ts'
 import { containerConfig } from './config.ts'
+import { CompletionWatcher } from './completion-watch.ts'
 import { Container } from './container.ts'
 import { registerIpc } from './ipc.ts'
 import { ContainerLog } from './log.ts'
+import { showCompletion, shouldNotify } from './notifications.ts'
+import { strings } from './locale.ts'
 import { buildMenu } from './menu.ts'
 import { overridePaths, paths } from './paths.ts'
 import { runSmoke } from './smoke.ts'
@@ -69,6 +72,7 @@ if (!smoke && !app.requestSingleInstanceLock()) {
   const log = new ContainerLog(join(paths().logs, 'container.log'))
   let container: Container | undefined
   let windows: WindowManager | undefined
+  let watcher: CompletionWatcher | undefined
   let quitting = false
 
   const main = async (): Promise<void> => {
@@ -98,6 +102,27 @@ if (!smoke && !app.requestSingleInstanceLock()) {
       openLogs: () => { void active.reveal('logs') },
       openDocumentation: () => { void shell.openExternal('https://deepseek-harness.github.io/deepseek-harness/') },
     }))
+    // Finished turns are read from the session logs rather than from the harness,
+    // so a conversation that ends while the window is in the background still
+    // reaches the user.
+    watcher = new CompletionWatcher({
+      home: () => active.harnessHomePath(),
+      onComplete: (completion) => {
+        const enabled = active.settings().notifyOnTurnEnd
+        const focused = windows?.isHarnessFocused() === true
+        // Recorded whether or not a notification follows, so "why was I not told"
+        // and "why was I told" are both answerable from the log.
+        log.push(
+          'notify',
+          `turn ${String(completion.turn)} finished in ${completion.sessionId} (${completion.reason}); ` +
+            (enabled ? (focused ? 'window was focused, so nothing was raised' : 'raising a notification') : 'notifications are switched off'),
+        )
+        if (!shouldNotify({ focused, enabled })) return
+        showCompletion(completion, strings().turnComplete, () => { windows?.focusHarness() })
+      },
+    })
+    watcher.start()
+
     if (smoke) windows.showConsole()
     else windows.showConsole({ splash: true })
     const launchStarted = Date.now()
@@ -112,6 +137,7 @@ if (!smoke && !app.requestSingleInstanceLock()) {
         ...(install === undefined ? {} : { install }),
         ...(homeMode === undefined ? {} : { homeMode }),
         ...(has('--smoke-client-update') ? { clientUpdate: true } : {}),
+        ...(has('--smoke-notifications') ? { notifications: true } : {}),
       })
       app.quit()
     }
@@ -127,6 +153,7 @@ if (!smoke && !app.requestSingleInstanceLock()) {
     if (quitting || container === undefined) return
     quitting = true
     event.preventDefault()
+    watcher?.stop()
     void container.shutdown().finally(() => {
       log.push('container', 'backend stopped; quitting')
       log.close()

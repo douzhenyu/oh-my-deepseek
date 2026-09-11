@@ -1,6 +1,6 @@
 {
   "name": "oh-my-deepseek",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "author": "oh-my-deepseek contributors",
   "description": "Cross-platform desktop container for the DeepSeek Harness (dsh)",

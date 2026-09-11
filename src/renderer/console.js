@@ -60,6 +60,7 @@ const COPY = {
     autoStart: 'Start the backend when the container opens',
     checkOnLaunch: 'Check for new harness versions on launch',
     checkClientOnLaunch: 'Check for a new client version on launch',
+    notifyOnTurnEnd: 'Notify me when a conversation finishes',
     bundled: 'bundled',
     installedBadge: 'installed',
     activeBadge: 'active',
@@ -129,6 +130,7 @@ const COPY = {
     autoStart: '打开容器时自动启动后台',
     checkOnLaunch: '启动时检查新的 Harness 版本',
     checkClientOnLaunch: '启动时检查新的客户端版本',
+    notifyOnTurnEnd: '对话完成后发送系统通知',
     bundled: '内置',
     installedBadge: '已安装',
     activeBadge: '运行中',
@@ -225,6 +227,8 @@ const render = (state) => {
   el('check-on-launch-label').textContent = t.checkOnLaunch
   el('check-client-on-launch-label').textContent = t.checkClientOnLaunch
   el('check-client-on-launch').checked = state.checkClientUpdatesOnLaunch
+  el('notify-on-turn-end-label').textContent = t.notifyOnTurnEnd
+  el('notify-on-turn-end').checked = state.notifyOnTurnEnd
   el('save-home').textContent = t.saveHome
   el('home-shared').textContent = t.homeShared
   el('home-separate').textContent = t.homeSeparate
@@ -379,6 +383,9 @@ el('check-on-launch').addEventListener('change', (event) => {
 })
 el('check-client-on-launch').addEventListener('change', (event) => {
   void call(() => window.container.updateSettings({ checkClientUpdatesOnLaunch: event.target.checked }))
+})
+el('notify-on-turn-end').addEventListener('change', (event) => {
+  void call(() => window.container.updateSettings({ notifyOnTurnEnd: event.target.checked }))
 })
 
 window.container.subscribe(render)

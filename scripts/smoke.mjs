@@ -14,6 +14,7 @@
  *   npm run smoke -- --home separate         # verify the independent harness home
  *   npm run smoke -- --theme dark            # verify the other colour scheme
  *   npm run smoke -- --client-update         # check and download from the release feed
+ *   npm run smoke -- --notifications         # exercise the completion notification
  */
 
 import { execFileSync, spawn } from 'node:child_process'
@@ -35,6 +36,7 @@ const installVersion = optionValue('--install')
 const homeMode = optionValue('--home')
 const forcedTheme = optionValue('--theme')
 const clientUpdate = process.argv.includes('--client-update')
+const notifications = process.argv.includes('--notifications')
 
 const keep = process.argv.includes('--keep')
 
@@ -148,6 +150,7 @@ const child = spawn(electron, [
   ...(homeMode === undefined ? [] : ['--smoke-home-mode', homeMode]),
   ...(forcedTheme === undefined ? [] : ['--smoke-theme', forcedTheme]),
   ...(clientUpdate ? ['--smoke-client-update'] : []),
+  ...(notifications ? ['--smoke-notifications'] : []),
 ], {
   cwd: at('.'),
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -188,6 +191,21 @@ check(`the console is branded "${config.productName}"`, report.console?.heading 
 check('the Harness page booted', report.page !== undefined && report.page.mode !== 'queue', JSON.stringify(report.page ?? {}))
 check('unauthenticated requests are rejected', report.http?.rootWithoutCookie === 401, `status ${String(report.http?.rootWithoutCookie)}`)
 check('the one-time token URL is honoured', report.http?.tokenHandoff === 303, `status ${String(report.http?.tokenHandoff)}`)
+if (notifications) {
+  const n = report.notifications
+  check('existing turns in a session log are not reported as news', n?.historySuppressed === true, n?.error ?? '')
+  check('a finished turn is reported exactly once', n?.detected === 1 && n?.sinkCalls === 1, `detected=${String(n?.detected)} sink=${String(n?.sinkCalls)}`)
+  check('the notification names the conversation', n?.title === 'Fixture conversation', n?.title ?? 'no title')
+  check('a delegated session does not report a completion', n?.delegatedIgnored === true)
+  check('notifications are skipped while the window is focused', n?.decision?.focused === false)
+  check('notifications are skipped when switched off', n?.decision?.disabled === false)
+  check('the platform can raise notifications', n?.supported === true, String(n?.supported))
+  check(
+    'a real session log scans and decodes frame by frame',
+    n?.realLogFrames !== undefined && n.realLogFrames === n.realLogDecoded && n.realLogFrames > 0,
+    `${String(n?.realLogDecoded)}/${String(n?.realLogFrames)} frames`,
+  )
+}
 if (clientUpdate) {
   const update = report.clientUpdate
   check(

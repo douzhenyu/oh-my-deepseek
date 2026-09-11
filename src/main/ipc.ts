@@ -39,6 +39,7 @@ const asSettingsPatch = (value: unknown): SettingsPatch => {
   if (typeof source.autoStart === 'boolean') patch.autoStart = source.autoStart
   if (typeof source.checkUpdatesOnLaunch === 'boolean') patch.checkUpdatesOnLaunch = source.checkUpdatesOnLaunch
   if (typeof source.checkClientUpdatesOnLaunch === 'boolean') patch.checkClientUpdatesOnLaunch = source.checkClientUpdatesOnLaunch
+  if (typeof source.notifyOnTurnEnd === 'boolean') patch.notifyOnTurnEnd = source.notifyOnTurnEnd
   if (typeof source.dshHome === 'string') patch.dshHome = source.dshHome
   return patch
 }

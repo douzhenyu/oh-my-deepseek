@@ -139,6 +139,8 @@ export interface ContainerState {
   checkUpdatesOnLaunch: boolean
   /** Whether the container queries the release feed during launch. */
   checkClientUpdatesOnLaunch: boolean
+  /** Whether finished conversations raise a desktop notification. */
+  notifyOnTurnEnd: boolean
   /** Client update state, independent of the harness versions below it. */
   client: ClientUpdateState
   /** Version the `latest` tag names, when the registry reported one. */
@@ -159,6 +161,8 @@ export interface ContainerSettings {
   checkUpdatesOnLaunch: boolean
   /** Whether to query the release feed for a newer client during launch. */
   checkClientUpdatesOnLaunch: boolean
+  /** Whether to raise a desktop notification when a conversation finishes. */
+  notifyOnTurnEnd: boolean
   /** Harness home; absent means the standard `DSH_HOME` then `~/.dsh`. */
   dshHome?: string
 }

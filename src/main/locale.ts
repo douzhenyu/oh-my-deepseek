@@ -64,6 +64,10 @@ interface Strings {
   autoStart: string
   /** Label: check for new versions on launch. */
   checkOnLaunch: string
+  /** Label: notify when a conversation finishes. */
+  notifyOnTurnEnd: string
+  /** Body of the notification raised when a conversation finishes. */
+  turnComplete: string
   /** Status text per lifecycle phase. */
   phase: Record<string, string>
   /** Native menu labels. */
@@ -111,6 +115,8 @@ const en: Strings = {
   defaultHome: 'Default (DSH_HOME or ~/.dsh)',
   autoStart: 'Start the backend when the container opens',
   checkOnLaunch: 'Check for new harness versions on launch',
+  notifyOnTurnEnd: 'Notify me when a conversation finishes',
+  turnComplete: 'The reply is ready.',
   phase: {
     checking: 'Preparing…',
     installing: 'Installing…',
@@ -163,6 +169,8 @@ const zh: Strings = {
   defaultHome: '默认（DSH_HOME 或 ~/.dsh）',
   autoStart: '打开容器时自动启动后台',
   checkOnLaunch: '启动时检查新的 Harness 版本',
+  notifyOnTurnEnd: '对话完成后发送系统通知',
+  turnComplete: '回复已完成。',
   phase: {
     checking: '准备中…',
     installing: '安装中…',

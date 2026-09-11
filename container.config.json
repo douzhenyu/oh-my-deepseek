@@ -1,0 +1,10 @@
+{
+  "productName": "Oh my deepseek!",
+  "dataDirectory": "Oh My DeepSeek",
+  "appId": "com.ohmydeepseek.desktop",
+  "dshPackage": "@deepseek-ai/dsh",
+  "nodeVersion": "24.17.0",
+  "dshSeedVersion": "0.1.5-rc.1",
+  "defaultPort": 3080,
+  "registry": "https://registry.npmjs.org"
+}

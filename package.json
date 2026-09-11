@@ -1,0 +1,39 @@
+{
+  "name": "oh-my-deepseek",
+  "version": "0.1.0",
+  "private": true,
+  "author": "oh-my-deepseek contributors",
+  "description": "Cross-platform desktop container for the DeepSeek Harness (dsh)",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/main.js",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "icons": "node scripts/make-icons.mjs",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run build",
+    "start": "npm run build && electron .",
+    "console": "npm run build && electron . --console",
+    "smoke": "node scripts/smoke.mjs",
+    "verify:crash": "node scripts/verify-crash-teardown.mjs",
+    "release:check": "node scripts/publish-release.mjs --dry-run",
+    "release": "node scripts/publish-release.mjs",
+    "prepare:node": "node scripts/fetch-node.mjs",
+    "prepare:seed": "node scripts/prepare-seed.mjs",
+    "prepare:app": "npm run prepare:node && npm run prepare:seed",
+    "package:mac:arm64": "node scripts/package-target.mjs mac-arm64",
+    "package:mac:x64": "node scripts/package-target.mjs mac-x64",
+    "package:win:x64": "node scripts/package-target.mjs win-x64",
+    "package:dir": "node scripts/package-target.mjs --dir"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "@types/semver": "^7.7.1",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.25.10",
+    "semver": "^7.7.3",
+    "typescript": "^5.9.3"
+  }
+}

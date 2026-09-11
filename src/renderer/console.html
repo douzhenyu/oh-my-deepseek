@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+    <title>Console</title>
+    <link rel="stylesheet" href="console.css" />
+  </head>
+  <body>
+    <header class="head">
+      <div>
+        <h1 id="heading">Oh my deepseek!</h1>
+        <p id="tagline" class="tagline"></p>
+      </div>
+      <span id="status" class="pill" data-phase="checking">…</span>
+    </header>
+
+    <section class="card">
+      <div class="card-head">
+        <h2 id="backend-title">Backend</h2>
+        <div class="actions">
+          <button id="open-harness" class="primary" type="button"></button>
+          <button id="start" type="button"></button>
+          <button id="stop" type="button"></button>
+          <button id="restart" type="button"></button>
+        </div>
+      </div>
+      <dl class="facts">
+        <dt id="running-label">Running</dt>
+        <dd id="running-value">—</dd>
+        <dt>PID</dt>
+        <dd id="pid-value">—</dd>
+        <dt>URL</dt>
+        <dd id="url-value">—</dd>
+      </dl>
+      <p id="detail" class="detail"></p>
+      <div id="progress" class="progress" hidden><div class="bar"></div></div>
+      <p id="error" class="error" hidden></p>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2 id="version-title">Harness version</h2>
+        <div class="actions">
+          <button id="refresh" type="button"></button>
+        </div>
+      </div>
+      <p id="latest" class="detail"></p>
+      <div class="columns">
+        <div>
+          <h3 id="installed-title">Installed</h3>
+          <ul id="installed" class="list"></ul>
+        </div>
+        <div>
+          <h3 id="published-title">Published</h3>
+          <ul id="remote" class="list scroll"></ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2 id="advanced-title">Advanced</h2>
+        <div class="actions">
+          <button id="open-logs" type="button"></button>
+          <button id="open-data" type="button"></button>
+          <button id="copy-log" type="button"></button>
+        </div>
+      </div>
+      <dl class="facts">
+        <dt id="home-label">Harness home</dt>
+        <dd id="home-value">—</dd>
+        <dt>App</dt>
+        <dd id="app-value">—</dd>
+      </dl>
+      <div class="actions home-modes">
+        <button id="home-shared" type="button"></button>
+        <button id="home-separate" type="button"></button>
+      </div>
+      <p id="home-note" class="note"></p>
+      <details class="custom">
+        <summary id="home-custom-label"></summary>
+        <div class="field">
+          <input id="home-input" type="text" spellcheck="false" />
+          <button id="save-home" type="button"></button>
+        </div>
+      </details>
+      <label class="toggle"><input id="auto-start" type="checkbox" /> <span id="auto-start-label"></span></label>
+      <label class="toggle"><input id="check-on-launch" type="checkbox" /> <span id="check-on-launch-label"></span></label>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2 id="log-title">Log</h2></div>
+      <pre id="log" class="log"></pre>
+    </section>
+
+    <script src="console.js"></script>
+  </body>
+</html>

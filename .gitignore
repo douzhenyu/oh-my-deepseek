@@ -1,0 +1,8 @@
+node_modules/
+lib/
+.build/
+.smoke/
+resources/node/
+resources/dsh-seed/
+*.log
+.DS_Store

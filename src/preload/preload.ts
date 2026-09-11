@@ -33,6 +33,7 @@ const bridge: ContainerBridge = {
   installClientUpdate: () => ipcRenderer.invoke(CHANNELS.installClientUpdate) as Promise<void>,
   revealClientUpdate: () => ipcRenderer.invoke(CHANNELS.revealClientUpdate) as Promise<void>,
   openClientRelease: () => ipcRenderer.invoke(CHANNELS.openClientRelease) as Promise<void>,
+  testNotification: () => ipcRenderer.invoke(CHANNELS.testNotification) as Promise<boolean>,
 }
 
 contextBridge.exposeInMainWorld('container', bridge)

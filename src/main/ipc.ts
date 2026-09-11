@@ -49,7 +49,7 @@ const asSettingsPatch = (value: unknown): SettingsPatch => {
  * @param container - The container the channels act on.
  * @param hooks - Window-level actions the container does not own.
  */
-export const registerIpc = (container: Container, hooks: { openHarness: () => void }): void => {
+export const registerIpc = (container: Container, hooks: { openHarness: () => void; testNotification: () => boolean }): void => {
   ipcMain.handle(CHANNELS.snapshot, () => container.snapshot())
   ipcMain.handle(CHANNELS.openHarness, () => { hooks.openHarness() })
   ipcMain.handle(CHANNELS.refreshRemote, async () => { await container.refreshRemote() })
@@ -66,4 +66,5 @@ export const registerIpc = (container: Container, hooks: { openHarness: () => vo
   ipcMain.handle(CHANNELS.installClientUpdate, async () => { await container.installClientUpdate() })
   ipcMain.handle(CHANNELS.revealClientUpdate, () => { container.revealClientUpdate() })
   ipcMain.handle(CHANNELS.openClientRelease, async () => { await container.openClientRelease() })
+  ipcMain.handle(CHANNELS.testNotification, () => hooks.testNotification())
 }

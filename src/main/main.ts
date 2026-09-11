@@ -17,7 +17,7 @@ import { CompletionWatcher } from './completion-watch.ts'
 import { Container } from './container.ts'
 import { registerIpc } from './ipc.ts'
 import { ContainerLog } from './log.ts'
-import { showCompletion, shouldNotify } from './notifications.ts'
+import { showCompletion, showTest, shouldNotify } from './notifications.ts'
 import { strings } from './locale.ts'
 import { buildMenu } from './menu.ts'
 import { overridePaths, paths } from './paths.ts'
@@ -92,6 +92,11 @@ if (!smoke && !app.requestSingleInstanceLock()) {
     const active = container
     registerIpc(active, {
       openHarness: () => { windows?.focusHarness() },
+      testNotification: () => {
+        const shown = showTest(strings().turnCompleteTest, () => { windows?.focusHarness() })
+        log.push('notify', shown ? 'test notification raised from the console' : 'the platform does not support notifications')
+        return shown
+      },
     })
     Menu.setApplicationMenu(buildMenu({
       showConsole: () => { windows?.showConsole() },

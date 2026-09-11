@@ -122,3 +122,6 @@ button.danger:hover:not(:disabled) { border-color: var(--bad); color: var(--bad)
 
 /* The download bar shows real progress, unlike the indeterminate backend bar. */
 .progress-fill { width: 0; animation: none; transition: width .15s linear; }
+
+/* The test button lives inside the notification toggle; keep it visually separate. */
+.toggle button { margin-left: 6px; padding: 2px 8px; font-size: 11px; }

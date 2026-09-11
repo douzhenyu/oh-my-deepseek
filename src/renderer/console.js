@@ -61,6 +61,9 @@ const COPY = {
     checkOnLaunch: 'Check for new harness versions on launch',
     checkClientOnLaunch: 'Check for a new client version on launch',
     notifyOnTurnEnd: 'Notify me when a conversation finishes',
+    testNotification: 'Send a test',
+    testSent: 'Test notification sent.',
+    testUnsupported: 'This system does not support notifications.',
     bundled: 'bundled',
     installedBadge: 'installed',
     activeBadge: 'active',
@@ -131,6 +134,9 @@ const COPY = {
     checkOnLaunch: '启动时检查新的 Harness 版本',
     checkClientOnLaunch: '启动时检查新的客户端版本',
     notifyOnTurnEnd: '对话完成后发送系统通知',
+    testNotification: '发送测试',
+    testSent: '测试通知已发送。',
+    testUnsupported: '当前系统不支持通知。',
     bundled: '内置',
     installedBadge: '已安装',
     activeBadge: '运行中',
@@ -228,6 +234,7 @@ const render = (state) => {
   el('check-client-on-launch-label').textContent = t.checkClientOnLaunch
   el('check-client-on-launch').checked = state.checkClientUpdatesOnLaunch
   el('notify-on-turn-end-label').textContent = t.notifyOnTurnEnd
+  el('test-notification').textContent = t.testNotification
   el('notify-on-turn-end').checked = state.notifyOnTurnEnd
   el('save-home').textContent = t.saveHome
   el('home-shared').textContent = t.homeShared
@@ -383,6 +390,14 @@ el('check-on-launch').addEventListener('change', (event) => {
 })
 el('check-client-on-launch').addEventListener('change', (event) => {
   void call(() => window.container.updateSettings({ checkClientUpdatesOnLaunch: event.target.checked }))
+})
+el('test-notification').addEventListener('click', (event) => {
+  // The button sits inside the toggle's label, so the click must not flip the setting.
+  event.preventDefault()
+  void call(async () => {
+    const shown = await window.container.testNotification()
+    setTransient(shown ? t.testSent : t.testUnsupported)
+  })
 })
 el('notify-on-turn-end').addEventListener('change', (event) => {
   void call(() => window.container.updateSettings({ notifyOnTurnEnd: event.target.checked }))

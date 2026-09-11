@@ -203,6 +203,8 @@ export const CHANNELS = {
   revealClientUpdate: 'container:client:reveal',
   /** Renderer → main: open the release page in the default browser. */
   openClientRelease: 'container:client:page',
+  /** Renderer → main: raise a notification on demand, to check the platform path. */
+  testNotification: 'container:notify:test',
 } as const
 
 /** Operations the console may open a platform file manager for. */
@@ -247,4 +249,6 @@ export interface ContainerBridge {
   revealClientUpdate(): Promise<void>
   /** Open the offered release's page. */
   openClientRelease(): Promise<void>
+  /** Raise a notification on demand. Resolves to whether the platform accepted it. */
+  testNotification(): Promise<boolean>
 }

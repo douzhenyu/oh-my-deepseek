@@ -43,6 +43,8 @@ interface ConsoleProbe {
   status: string
   /** Client update card text, which proves the new card rendered. */
   clientNote: string
+  /** Label of the on-demand notification button. */
+  testNotification: string
 }
 
 /** What the console window reports about its own appearance. */
@@ -161,11 +163,11 @@ const waitForBoot = async (windows: WindowManager, timeoutMs: number): Promise<P
  */
 const waitForConsole = async (windows: WindowManager, timeoutMs: number): Promise<ConsoleProbe> => {
   const deadline = Date.now() + timeoutMs
-  let last: ConsoleProbe = { ready: false, heading: '', status: '', clientNote: '' }
+  let last: ConsoleProbe = { ready: false, heading: '', status: '', clientNote: '', testNotification: '' }
   while (Date.now() < deadline) {
     try {
       last = await windows.evaluateConsole<ConsoleProbe>(
-        "({ ready: document.documentElement.dataset.consoleReady === 'true', heading: (document.getElementById('heading') || {}).textContent || '', status: (document.getElementById('status') || {}).textContent || '', clientNote: (document.getElementById('client-note') || {}).textContent || '' })",
+        "({ ready: document.documentElement.dataset.consoleReady === 'true', heading: (document.getElementById('heading') || {}).textContent || '', status: (document.getElementById('status') || {}).textContent || '', clientNote: (document.getElementById('client-note') || {}).textContent || '', testNotification: (document.getElementById('test-notification') || {}).textContent || '' })",
       )
       if (last.ready) return last
     } catch {
@@ -453,6 +455,7 @@ export const runSmoke = async (
     report.timings['consoleBoot'] = Date.now() - started
     if (console_.heading.trim() === '') throw new Error('the console window rendered no heading')
     if (console_.clientNote.trim() === '') throw new Error('the client update card rendered no status line')
+    if (console_.testNotification.trim() === '') throw new Error('the notification test button rendered no label')
     const brand = containerConfig().productName
     if (console_.heading.trim() !== brand) throw new Error(`the console heading is "${console_.heading}", expected the product name "${brand}"`)
     const page = await waitForBoot(windows, 60_000)

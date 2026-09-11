@@ -68,6 +68,8 @@ interface Strings {
   notifyOnTurnEnd: string
   /** Body of the notification raised when a conversation finishes. */
   turnComplete: string
+  /** Body of an on-demand test notification. */
+  turnCompleteTest: string
   /** Status text per lifecycle phase. */
   phase: Record<string, string>
   /** Native menu labels. */
@@ -117,6 +119,7 @@ const en: Strings = {
   checkOnLaunch: 'Check for new harness versions on launch',
   notifyOnTurnEnd: 'Notify me when a conversation finishes',
   turnComplete: 'The reply is ready.',
+  turnCompleteTest: 'Test notification — if you can see this, notifications work.',
   phase: {
     checking: 'Preparing…',
     installing: 'Installing…',
@@ -171,6 +174,7 @@ const zh: Strings = {
   checkOnLaunch: '启动时检查新的 Harness 版本',
   notifyOnTurnEnd: '对话完成后发送系统通知',
   turnComplete: '回复已完成。',
+  turnCompleteTest: '这是一条测试通知——能看到就说明通知正常。',
   phase: {
     checking: '准备中…',
     installing: '安装中…',

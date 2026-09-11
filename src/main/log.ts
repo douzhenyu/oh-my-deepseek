@@ -27,6 +27,21 @@ const TOKEN_PATTERN = /([?&]token=)[^&\s]+/g
  */
 export const redact = (text: string): string => text.replace(TOKEN_PATTERN, '$1<redacted>')
 
+/**
+ * Timestamp for one log line, in local time with the date.
+ *
+ * UTC here would put the container's own lines in a different time zone from the
+ * backend's, which carry the harness's local timestamps — reading one file with
+ * two clocks is a reliable way to misdiagnose a timeline.
+ * @returns `YYYY-MM-DD HH:MM:SS` in the machine's local zone.
+ */
+const localStamp = (): string => {
+  const now = new Date()
+  const pad = (value: number, width = 2): string => String(value).padStart(width, '0')
+  return `${pad(now.getFullYear(), 4)}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ` +
+    `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+}
+
 /** Bounded, redacting log shared by the main process and the console renderer. */
 export class ContainerLog {
   private readonly lines: string[] = []
@@ -62,7 +77,7 @@ export class ContainerLog {
    * @param text - Raw text, possibly multi-line and possibly containing a token.
    */
   push(source: string, text: string): void {
-    const stamp = new Date().toISOString().slice(11, 19)
+    const stamp = localStamp()
     let appended = false
     for (const raw of redact(text).split(/\r?\n/)) {
       const line = raw.trimEnd()

@@ -36,6 +36,7 @@ if (nodePlatform === 'win32') {
     from: `resources/node/${nodePlatform}-${arch}/node_modules`,
     to: `node/${nodePlatform}-${arch}/node_modules`,
   })
+  extraResources.push({ from: 'build/icon.png', to: 'tray-icon.png' })
 }
 const seed = join(root, 'resources', 'dsh-seed')
 const seedMarker = join(seed, 'seed.json')
@@ -103,6 +104,7 @@ const verifyResources = async (context) => {
   ]
   const seedEntry = join(resources, 'dsh-seed', 'node_modules', ...config.dshPackage.split('/'), 'lib', 'bin.js')
   const seedBundled = seedMatchesTarget()
+  if (nodePlatform === 'win32') required.push(join(resources, 'tray-icon.png'))
   if (seedBundled) required.push(seedEntry)
   const missing = required.filter((path) => !existsSync(path))
   if (missing.length > 0) throw new Error(`packaged application is missing: ${missing.join(', ')}`)

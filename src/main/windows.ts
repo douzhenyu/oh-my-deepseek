@@ -15,6 +15,16 @@ import { containerConfig } from './config.ts'
 import { strings } from './locale.ts'
 import { paths } from './paths.ts'
 
+/** Host lifecycle callbacks that BrowserWindow itself cannot decide. */
+interface WindowManagerOptions {
+  /** Keep automated windows off screen while still loading their real content. */
+  headless: boolean
+  /** Whether a user close request should hide, rather than destroy, the window. */
+  shouldHideOnClose?: () => boolean
+  /** Called after a close request leaves every application window hidden. */
+  onAllHidden?: () => void
+}
+
 /** Creates, focuses, and disposes the container's windows. */
 export class WindowManager {
   private harnessWindow: BrowserWindow | undefined
@@ -25,10 +35,33 @@ export class WindowManager {
    * @param options - `headless` creates windows without ever showing them, which
    *   is what an automated smoke run needs.
    */
-  constructor(private readonly options: { headless: boolean } = { headless: false }) {
+  constructor(private readonly options: WindowManagerOptions = { headless: false }) {
     // A window already on screen keeps its old background unless it is told; the
     // system scheme can flip at any time while the container is open.
     nativeTheme.on('updated', () => { this.applyAppearance() })
+  }
+
+  /** Show and focus a window unless this is a headless verification run. */
+  private reveal(window: BrowserWindow): void {
+    if (this.options.headless) return
+    window.show()
+    window.focus()
+  }
+
+  /** Whether at least one application window is visible to the user. */
+  private anyVisible(): boolean {
+    return [this.consoleWindow, this.harnessWindow]
+      .some((window) => window !== undefined && !window.isDestroyed() && window.isVisible())
+  }
+
+  /** Turn the native close button into a background action during normal use. */
+  private keepAliveOnClose(window: BrowserWindow): void {
+    window.on('close', (event) => {
+      if (this.options.shouldHideOnClose?.() !== true) return
+      event.preventDefault()
+      window.hide()
+      if (!this.anyVisible()) this.options.onAllHidden?.()
+    })
   }
 
   /** Repaint both windows for the current system scheme. */
@@ -61,8 +94,8 @@ export class WindowManager {
    */
   showConsole(options: { splash: boolean } = { splash: false }): void {
     if (this.consoleOpen) {
-      this.consoleWindow?.show()
-      this.consoleWindow?.focus()
+      this.splash = options.splash
+      if (this.consoleWindow !== undefined) this.reveal(this.consoleWindow)
       return
     }
     const window = new BrowserWindow({
@@ -83,7 +116,8 @@ export class WindowManager {
     })
     this.consoleWindow = window
     this.splash = options.splash
-    window.once('ready-to-show', () => { if (!this.options.headless) window.show() })
+    this.keepAliveOnClose(window)
+    window.once('ready-to-show', () => { this.reveal(window) })
     window.on('closed', () => {
       this.consoleWindow = undefined
       this.splash = false
@@ -93,7 +127,9 @@ export class WindowManager {
 
   /** Close the console window when it is the startup splash. */
   closeSplashConsole(): void {
-    if (this.consoleIsSplash) this.consoleWindow?.close()
+    // This is an internal transition rather than a user close request, so the
+    // temporary splash can be destroyed instead of becoming a hidden window.
+    if (this.consoleIsSplash) this.consoleWindow?.destroy()
   }
 
   /**
@@ -105,8 +141,7 @@ export class WindowManager {
     const existing = this.harnessWindow
     if (existing !== undefined && !existing.isDestroyed()) {
       await existing.loadURL(url)
-      existing.show()
-      existing.focus()
+      this.reveal(existing)
       return
     }
     const window = new BrowserWindow({
@@ -128,7 +163,8 @@ export class WindowManager {
       },
     })
     this.harnessWindow = window
-    window.once('ready-to-show', () => { if (!this.options.headless) window.show() })
+    this.keepAliveOnClose(window)
+    window.once('ready-to-show', () => { this.reveal(window) })
     window.on('closed', () => { this.harnessWindow = undefined })
     // The Harness page sets its own document title. The container owns the
     // window chrome, so the native title bar keeps showing the product name.
@@ -199,11 +235,15 @@ export class WindowManager {
     return this.harnessOpen && this.harnessWindow?.isFocused() === true
   }
 
+  /** Ask the Harness window to close, exercising the same path as its X button. */
+  closeHarness(): void {
+    this.harnessWindow?.close()
+  }
+
   /** Focus the Harness window when open. @returns Whether it was focused. */
   focusHarness(): boolean {
-    if (!this.harnessOpen) return false
-    this.harnessWindow?.show()
-    this.harnessWindow?.focus()
+    if (!this.harnessOpen || this.harnessWindow === undefined) return false
+    this.reveal(this.harnessWindow)
     return true
   }
 }

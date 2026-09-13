@@ -15,6 +15,7 @@
  *   npm run smoke -- --theme dark            # verify the other colour scheme
  *   npm run smoke -- --client-update         # check and download from the release feed
  *   npm run smoke -- --notifications         # exercise the completion notification
+ *   npm run smoke -- --plugin dsh-answer-reviewer # install/remove one plugin and verify restarts
  */
 
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
@@ -37,6 +38,7 @@ const homeMode = optionValue('--home')
 const forcedTheme = optionValue('--theme')
 const clientUpdate = process.argv.includes('--client-update')
 const notifications = process.argv.includes('--notifications')
+const plugin = optionValue('--plugin')
 
 const keep = process.argv.includes('--keep')
 
@@ -151,6 +153,7 @@ const child = spawn(electron, [
   ...(forcedTheme === undefined ? [] : ['--smoke-theme', forcedTheme]),
   ...(clientUpdate ? ['--smoke-client-update'] : []),
   ...(notifications ? ['--smoke-notifications'] : []),
+  ...(plugin === undefined ? [] : ['--smoke-plugin', plugin]),
 ], {
   cwd: at('.'),
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -190,6 +193,12 @@ if (binaryPath !== undefined && process.platform === 'darwin') {
   const details = `${described.stdout ?? ''}${described.stderr ?? ''}`
   const identifier = /Identifier=(\S+)/.exec(details)?.[1]
   const flags = /flags=(\S+)/.exec(details)?.[1] ?? ''
+  const verified = spawnSync('codesign', ['--verify', '--deep', '--strict', bundle], { encoding: 'utf8' })
+  check(
+    'the complete application signature is valid',
+    verified.status === 0,
+    `${verified.stdout ?? ''}${verified.stderr ?? ''}`.trim(),
+  )
   check(
     'the packaged application is signed the way the notification API requires',
     identifier === config.appId && flags.includes('adhoc') && !flags.includes('linker-signed'),
@@ -243,6 +252,14 @@ if (clientUpdate) {
     (update?.downloadedBytes ?? 0) > 0 && update.cleanedUp === true,
     update?.downloadedBytes === undefined ? (update?.error ?? 'no file') : `${(update.downloadedBytes / 1048576).toFixed(1)} MB, removed after the check`,
   )
+}
+if (plugin !== undefined) {
+  const market = report.pluginMarket
+  check('the native market loaded the community catalog', (market?.catalogCount ?? 0) > 1000, market?.error ?? String(market?.catalogCount))
+  check(`the market installed ${plugin}`, market?.installedVersion !== undefined, market?.installedVersion ?? market?.error ?? '')
+  check('the installed plugin joined the profile bundle stack', market?.installedBundle === true)
+  check('the market removed the test plugin again', market?.removed === true)
+  check('Harness restarted after both plugin changes', market?.restarted === true)
 }
 if (homeMode !== undefined) {
   const separate = join(userData, 'harness-home')

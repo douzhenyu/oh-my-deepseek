@@ -119,6 +119,16 @@ export interface SmokeReport {
     comparison?: { newer: boolean; equal: boolean; older: boolean; prerelease: boolean }
     error?: string
   }
+  pluginMarket?: {
+    ok: boolean
+    catalogCount?: number
+    plugin?: string
+    installedVersion?: string
+    installedBundle?: boolean
+    removed?: boolean
+    restarted?: boolean
+    error?: string
+  }
   install?: {
     version: string
     ok: boolean
@@ -413,6 +423,47 @@ const installAndSwitch = async (
 }
 
 /**
+ * Exercise the native market's full package lifecycle in the isolated smoke
+ * home: catalog → install → bundle reconciliation → restart → remove → restart.
+ */
+const exercisePluginMarket = async (
+  container: Container,
+  pluginName: string,
+): Promise<NonNullable<SmokeReport['pluginMarket']>> => {
+  const result: NonNullable<SmokeReport['pluginMarket']> = { ok: false, plugin: pluginName }
+  try {
+    const catalog = await container.refreshPluginMarket()
+    result.catalogCount = catalog.plugins.length
+    const plugin = catalog.plugins.find((entry) => entry.name === pluginName)
+    if (plugin === undefined) throw new Error(`the catalog has no plugin named ${pluginName}`)
+    if (plugin.installedPackage !== undefined) throw new Error(`${pluginName} was already installed in the isolated smoke home`)
+    const beforePid = container.snapshot().backendPid
+    const installed = await container.installPlugin(plugin.id)
+    const installedEntry = installed.plugins.find((entry) => entry.id === plugin.id)
+    result.installedVersion = installedEntry?.installedVersion
+    const dependency = installedEntry?.installedPackage
+    if (dependency === undefined) throw new Error('the installed package was not detected in the profile')
+    const profileManifest = readFileSync(join(container.harnessHomePath(), 'profiles', 'web', 'package.json'), 'utf8')
+    const profile = JSON.parse(profileManifest) as { dsh?: { profile?: { bundles?: string[] } } }
+    result.installedBundle = profile.dsh?.profile?.bundles?.includes(dependency) === true
+    const installedPid = container.snapshot().backendPid
+    const removed = await container.removePlugin(plugin.id)
+    result.removed = removed.plugins.find((entry) => entry.id === plugin.id)?.installedPackage === undefined
+    const removedPid = container.snapshot().backendPid
+    result.restarted = beforePid !== installedPid && installedPid !== removedPid
+    result.ok = (result.catalogCount ?? 0) > 1000
+      && result.installedVersion !== undefined
+      && result.installedBundle === true
+      && result.removed === true
+      && result.restarted === true
+      && container.snapshot().phase === 'ready'
+  } catch (error) {
+    result.error = error instanceof Error ? error.message : String(error)
+  }
+  return result
+}
+
+/**
  * Run the container verification and write its report.
  * @param container - A container that has already attempted to launch.
  * @param windows - Window layer used to inspect the Harness page.
@@ -422,6 +473,7 @@ const installAndSwitch = async (
  * @param options.notifications - Whether to exercise completion notification.
  * @param options.clientUpdate - Whether to exercise the client's own update path.
  * @param options.install - Version to install and activate, when requested.
+ * @param options.plugin - Catalog plugin to install and remove in the isolated smoke home.
  * @param options.homeMode - Harness home to switch to, when requested.
  * @param options.launchMs - How long the initial launch took, measured by the caller.
  * @returns Completion after the report is on disk; the caller then quits.
@@ -430,7 +482,7 @@ export const runSmoke = async (
   container: Container,
   windows: WindowManager,
   reportPath: string,
-  options: { install?: string; homeMode?: string; clientUpdate?: boolean; notifications?: boolean; launchMs: number },
+  options: { install?: string; plugin?: string; homeMode?: string; clientUpdate?: boolean; notifications?: boolean; launchMs: number },
 ): Promise<void> => {
   const started = Date.now()
   const state = container.snapshot()
@@ -480,8 +532,10 @@ export const runSmoke = async (
     if (options.clientUpdate === true) report.clientUpdate = await exerciseClientUpdate(container)
     if (options.homeMode !== undefined) report.home = await switchHome(container, windows, options.homeMode)
     if (options.install !== undefined) report.install = await installAndSwitch(container, windows, options.install)
-    report.ok = report.install === undefined || report.install.ok
-    if (!report.ok) report.error = report.install?.error ?? 'the version switch failed'
+    if (options.plugin !== undefined) report.pluginMarket = await exercisePluginMarket(container, options.plugin)
+    report.ok = (report.install === undefined || report.install.ok)
+      && (report.pluginMarket === undefined || report.pluginMarket.ok)
+    if (!report.ok) report.error = report.install?.error ?? report.pluginMarket?.error ?? 'an optional smoke scenario failed'
   } catch (error) {
     report.error = error instanceof Error ? `${error.message}` : String(error)
   }

@@ -91,6 +91,64 @@ export interface ClientUpdateState {
   installMode: 'installer' | 'manual'
 }
 
+/** One category advertised by the community plugin catalog. */
+export interface PluginMarketCategory {
+  /** Stable category key used for filtering. */
+  id: string
+  /** English label. */
+  en: string
+  /** Simplified-Chinese label. */
+  zh: string
+}
+
+/** One catalog entry enriched with its state in the active web profile. */
+export interface PluginMarketEntry {
+  /** Stable catalog identity. */
+  id: string
+  /** Display/package name from the catalog. */
+  name: string
+  /** Catalog author. */
+  owner: string
+  /** Source repository. */
+  sourceUrl: string
+  /** Human-facing catalog detail page. */
+  pageUrl: string
+  /** One or more category keys. */
+  categories: string[]
+  /** Bilingual catalog description. */
+  description: { en: string; zh: string }
+  /** Newest catalog version, when the package publishes one. */
+  version?: string
+  /** Repository stars reported by the catalog. */
+  stars?: number
+  /** Package downloads reported by the catalog. */
+  downloads?: number
+  /** Catalog insertion date. */
+  added?: string
+  /** Actual direct dependency name when installed in this profile. */
+  installedPackage?: string
+  /** Resolved installed version or dependency spec. */
+  installedVersion?: string
+  /** Whether the catalog version is newer than the installed semantic version. */
+  updateAvailable: boolean
+}
+
+/** Snapshot returned by the native plugin-market bridge. */
+export interface PluginMarketState {
+  /** Whether the remote catalog has been fetched in this process. */
+  catalogLoaded: boolean
+  /** Catalog generation timestamp, when supplied by the source. */
+  catalogUpdated?: string
+  /** Available filters. */
+  categories: PluginMarketCategory[]
+  /** Validated catalog entries with installed state. */
+  plugins: PluginMarketEntry[]
+  /** Installed entries that were matched to the catalog. */
+  installedCount: number
+  /** Installed entries whose published semantic version is newer. */
+  updateCount: number
+}
+
 /** The complete console-visible state; every field is safe to serialize to JSON. */
 export interface ContainerState {
   /** Current lifecycle phase. */
@@ -205,6 +263,16 @@ export const CHANNELS = {
   openClientRelease: 'container:client:page',
   /** Renderer → main: raise a notification on demand, to check the platform path. */
   testNotification: 'container:notify:test',
+  /** Renderer → main: read cached catalog and active-profile installation state. */
+  pluginMarketSnapshot: 'container:plugins:snapshot',
+  /** Renderer → main: fetch the community catalog. */
+  refreshPluginMarket: 'container:plugins:refresh',
+  /** Renderer → main: install or update one validated catalog entry. */
+  installPlugin: 'container:plugins:install',
+  /** Renderer → main: remove one installed catalog entry. */
+  removePlugin: 'container:plugins:remove',
+  /** Renderer → main: open one validated catalog detail page. */
+  openPluginPage: 'container:plugins:page',
 } as const
 
 /** Operations the console may open a platform file manager for. */
@@ -251,4 +319,14 @@ export interface ContainerBridge {
   openClientRelease(): Promise<void>
   /** Raise a notification on demand. Resolves to whether the platform accepted it. */
   testNotification(): Promise<boolean>
+  /** Read the native plugin market without a network request. */
+  pluginMarketSnapshot(): Promise<PluginMarketState>
+  /** Fetch a fresh community catalog and merge installed state. */
+  refreshPluginMarket(): Promise<PluginMarketState>
+  /** Install or update a plugin selected from the validated catalog. */
+  installPlugin(id: string): Promise<PluginMarketState>
+  /** Remove a plugin selected from the validated catalog. */
+  removePlugin(id: string): Promise<PluginMarketState>
+  /** Open a validated plugin detail page in the default browser. */
+  openPluginPage(id: string): Promise<void>
 }

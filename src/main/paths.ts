@@ -31,6 +31,10 @@ export interface ContainerPaths {
   npmCache: string
   /** Package-manager user configuration file, kept inside user data. */
   npmUserConfig: string
+  /** Corepack downloads the pinned profile package manager here. */
+  corepackHome: string
+  /** Content-addressed store for profile plugins, isolated from a global pnpm. */
+  pnpmStore: string
   /** Supervisor script that outlives the main process only long enough to reap the backend. */
   supervisor: string
 }
@@ -68,6 +72,8 @@ export const paths = (): ContainerPaths => {
     logs: join(userData, 'logs'),
     npmCache: join(userData, 'npm-cache'),
     npmUserConfig: join(userData, 'npmrc'),
+    corepackHome: join(userData, 'corepack'),
+    pnpmStore: join(userData, 'pnpm-store'),
     supervisor: packaged ? join(resources, 'supervisor.mjs') : join(appRoot, 'lib', 'supervisor.mjs'),
   }
   return cached

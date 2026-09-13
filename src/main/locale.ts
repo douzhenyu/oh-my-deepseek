@@ -56,6 +56,10 @@ interface Strings {
   upgradeAvailable: string
   /** Label: no upgrade available. */
   upToDate: string
+  /** Progress text while a profile plugin is being installed or updated. */
+  pluginInstalling: string
+  /** Progress text while a profile plugin is being removed. */
+  pluginRemoving: string
   /** Label: harness home directory. */
   dshHome: string
   /** Value shown when the harness home is the product default. */
@@ -113,6 +117,8 @@ const en: Strings = {
   latest: 'latest',
   upgradeAvailable: 'Update available',
   upToDate: 'Up to date',
+  pluginInstalling: 'Installing plugin…',
+  pluginRemoving: 'Removing plugin…',
   dshHome: 'Harness home',
   defaultHome: 'Default (DSH_HOME or ~/.dsh)',
   autoStart: 'Start the backend when the container opens',
@@ -168,6 +174,8 @@ const zh: Strings = {
   latest: '最新',
   upgradeAvailable: '有新版本可用',
   upToDate: '已是最新',
+  pluginInstalling: '正在安装插件…',
+  pluginRemoving: '正在卸载插件…',
   dshHome: 'Harness 数据目录',
   defaultHome: '默认（DSH_HOME 或 ~/.dsh）',
   autoStart: '打开容器时自动启动后台',

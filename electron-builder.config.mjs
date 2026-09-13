@@ -27,6 +27,16 @@ const extraResources = [
   { from: 'lib/supervisor.mjs', to: 'supervisor.mjs' },
   { from: `resources/node/${nodePlatform}-${arch}`, to: `node/${nodePlatform}-${arch}` },
 ]
+// The Windows archive keeps npm in a root node_modules directory, which
+// electron-builder excludes from a directory mapping. Without this explicit
+// second mapping the app ships node.exe but falls back to a nonexistent system
+// npm when it needs to install dsh on first launch.
+if (nodePlatform === 'win32') {
+  extraResources.push({
+    from: `resources/node/${nodePlatform}-${arch}/node_modules`,
+    to: `node/${nodePlatform}-${arch}/node_modules`,
+  })
+}
 const seed = join(root, 'resources', 'dsh-seed')
 const seedMarker = join(seed, 'seed.json')
 
@@ -62,7 +72,7 @@ if (seedMatchesTarget()) {
 /** Count files below a directory, or `-1` when it does not exist. */
 const countFiles = (directory) => {
   try {
-    return readdirSync(directory, { recursive: true }).length
+    return readdirSync(directory, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile()).length
   } catch {
     return -1
   }
@@ -78,12 +88,29 @@ const verifyResources = async (context) => {
   const required = [
     join(resources, 'supervisor.mjs'),
     join(resources, 'node', `${nodePlatform}-${arch}`, nodePlatform === 'win32' ? 'node.exe' : join('bin', 'node')),
+    join(
+      resources,
+      'node',
+      `${nodePlatform}-${arch}`,
+      nodePlatform === 'win32' ? join('node_modules', 'npm', 'bin', 'npm-cli.js') : join('lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    ),
+    join(
+      resources,
+      'node',
+      `${nodePlatform}-${arch}`,
+      nodePlatform === 'win32' ? join('node_modules', 'corepack', 'dist', 'corepack.js') : join('lib', 'node_modules', 'corepack', 'dist', 'corepack.js'),
+    ),
   ]
   const seedEntry = join(resources, 'dsh-seed', 'node_modules', ...config.dshPackage.split('/'), 'lib', 'bin.js')
   const seedBundled = seedMatchesTarget()
   if (seedBundled) required.push(seedEntry)
   const missing = required.filter((path) => !existsSync(path))
   if (missing.length > 0) throw new Error(`packaged application is missing: ${missing.join(', ')}`)
+  const runtimeSource = countFiles(join(root, 'resources', 'node', `${nodePlatform}-${arch}`))
+  const runtimePackaged = countFiles(join(resources, 'node', `${nodePlatform}-${arch}`))
+  if (runtimePackaged < runtimeSource) {
+    throw new Error(`the packaged Node.js runtime is incomplete: ${String(runtimePackaged)} entries copied from ${String(runtimeSource)}`)
+  }
   if (seedBundled) {
     const source = countFiles(join(root, 'resources', 'dsh-seed'))
     const packaged = countFiles(join(resources, 'dsh-seed'))
@@ -118,10 +145,10 @@ const wantsSignature = process.env.OHMYDSH_MAC_IDENTITY !== undefined || process
 const adhocSign = (context) => {
   if (context.electronPlatformName !== 'darwin') return
   const appPath = join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`)
-  execFileSync('codesign', ['--force', '--sign', '-', '--identifier', config.appId, appPath], { stdio: 'inherit' })
+  execFileSync('codesign', ['--force', '--deep', '--sign', '-', '--identifier', config.appId, appPath], { stdio: 'inherit' })
   const describe = execFileSync('codesign', ['-dv', appPath], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   console.log(`adhoc-signed ${appPath}\n${describe.trim()}`)
-  execFileSync('codesign', ['--verify', '--strict', appPath], { stdio: 'inherit' })
+  execFileSync('codesign', ['--verify', '--deep', '--strict', appPath], { stdio: 'inherit' })
   console.log('the bundled application verifies against its own signature')
 }
 

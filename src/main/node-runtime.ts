@@ -34,6 +34,15 @@ const bundledNpmCli = (): string =>
     process.platform === 'win32' ? join('node_modules', 'npm', 'bin', 'npm-cli.js') : join('lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
   )
 
+/** Absolute path of Corepack's JavaScript entry inside the bundled Node runtime. */
+const bundledCorepackCli = (): string =>
+  join(
+    paths().nodeDir,
+    process.platform === 'win32'
+      ? join('node_modules', 'corepack', 'dist', 'corepack.js')
+      : join('lib', 'node_modules', 'corepack', 'dist', 'corepack.js'),
+  )
+
 /**
  * Whether a prepared Node.js runtime is present in application resources.
  * @returns `true` when the bundled executable exists.
@@ -58,6 +67,21 @@ export const packageManager = (): RuntimeCommand => {
     return { command: bundledNode(), argsPrefix: [bundledNpmCli()], source: 'bundled' }
   }
   return { command: 'npm', argsPrefix: [], source: 'system' }
+}
+
+/**
+ * Resolve the pnpm command used for Harness profile plugins.
+ *
+ * Corepack belongs to the same upstream Node distribution as the runtime, so
+ * this works in a Finder launch and on Windows without a global pnpm install.
+ */
+export const profilePackageManager = (version: string): RuntimeCommand => {
+  const runtime = nodeRuntime()
+  const corepack = bundledCorepackCli()
+  if (runtime.source === 'bundled' && existsSync(corepack)) {
+    return { command: runtime.command, argsPrefix: [corepack, `pnpm@${version}`], source: 'bundled' }
+  }
+  return { command: 'corepack', argsPrefix: [`pnpm@${version}`], source: 'system' }
 }
 
 /**

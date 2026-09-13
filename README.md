@@ -52,6 +52,7 @@ DeepSeek Harness（`dsh`）的**跨平台桌面客户端容器**：把 harness �
 | 要在终端敲 `pnpm dsh web` | 打开客户端自动启动后端，就绪后自动加载界面 |
 | 关掉终端后端还在跑 | 关闭最后一个窗口即退出，并且后端进程组被回收（含异常崩溃路径） |
 | 升级 dsh 要懂 npm | 客户端内"Harness 版本"面板直接安装/切换/删除版本 |
+| 安装插件要在终端执行 `dsh plugin` | 客户端内置插件市场，搜索、安装、更新、卸载都在界面完成 |
 | 版本混乱 | 每个版本独立目录，随时切回旧版本；内置版本只读，升级只写用户数据目录 |
 
 > 与官方 `apps/desktop` 的区别：官方桌面端把 **外壳与 dsh 版本绑成一个发布单元**（升级 dsh = 升级整个客户端），这是它有意的架构决定。本容器反过来：**外壳与 dsh 版本解耦**，dsh 可以独立安装、升级、回退。代价是失去官方的签名发布流水线与免端口传输，换来"只是个容器"的轻量与灵活。
@@ -69,7 +70,18 @@ DeepSeek Harness（`dsh`）的**跨平台桌面客户端容器**：把 harness �
 - 在"Harness 版本"里：查看已安装版本（标记 `内置`/`已安装`/`运行中`）、一键 `使用`、删除用户安装的版本
 - 点"检查可用版本"从 npm registry 拉取全部已发布版本，按任意版本 `安装`（安装完自动切换并重启后端）
 - 有新版本时顶部会提示 `最新发布: x.y.z — 可升级到 x.y.z`
+- 在「插件市场」中搜索和筛选社区目录，一键安装、更新或卸载当前 web profile 的插件
 - 高级区：在「与命令行共用数据目录」和「使用独立数据目录」之间切换（会说明各自代价）、自定义数据目录路径、开关自动启动/启动时检查更新/对话完成通知、打开日志与数据目录
+
+### 客户端内置插件市场
+
+插件市场是客户端自己的页面，不加载或依赖 `dshmarket` 的前端。它读取 [awesome-dsh-plugin](https://awesome-dsh-plugin.com/) 的社区目录，并把每个条目与当前 Harness 数据目录下 `profiles/web/package.json` 的实际依赖对照，因此「已安装」和「可更新」状态跟随当前数据目录。
+
+- 支持中英文描述、关键词搜索、分类，以及按收藏数、下载数、收录时间和名称排序
+- 支持 npm 包、GitHub 仓库和目录中经过校验的 GitHub Release 压缩包
+- 安装、更新和卸载前会停止后台，完成后恢复原先的运行状态，避免配置与正在运行的 profile 互相争用
+- 包管理不调用系统 `pnpm`：客户端通过自带 Node 的 Corepack 运行固定版本的 pnpm，所以 Windows 用户也不需要先配置命令行环境
+- 安装完成后，客户端会根据插件 `package.json` 中的 `dsh.bundle.patch` 自动维护 `dsh.profile.bundles`
 
 ### 对话完成的系统通知
 
@@ -188,7 +200,7 @@ npm run console    # 启动并额外打开控制台窗口
 | Harness 会话、设置、凭据、存储 | 见下面的「两种数据目录模式」 |
 | 用户安装的 dsh 版本 | `<userData>/dsh/<version>/` |
 | dsh 内置版本 | `<app Resources>/dsh-seed/`（只读） |
-| npm 缓存与 npmrc | `<userData>/npm-cache`、`<userData>/npmrc` —— 不污染用户自己的 npm 状态 |
+| 包管理器缓存与 npmrc | `<userData>/npm-cache`、`<userData>/corepack`、`<userData>/pnpm-store`、`<userData>/npmrc` —— 不依赖系统级包管理器 |
 | 容器设置 | `<userData>/settings.json` |
 | 日志 | `<userData>/logs/container.log` |
 
@@ -414,7 +426,8 @@ src/
     backend.ts                 启动 supervisor、解析就绪行、回收进程组
     version-store.ts           版本发现、npm 安装（staging + 原子改名）、删除
     registry.ts                npm registry 版本查询
-    node-runtime.ts            自带 Node / npm 解析
+    node-runtime.ts            自带 Node / npm / Corepack 解析
+    plugin-market.ts           社区目录校验、安装状态与跨平台插件包管理
     windows.ts                 控制台窗口 + Harness 窗口
     preload.ts / ipc.ts        窄桥与校验过的 IPC 处理器
     log.ts                     有界日志 + token 脱敏

@@ -8,7 +8,7 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron'
-import { CHANNELS, type ContainerBridge, type ContainerState, type HarnessHomeMode, type RevealTarget, type SettingsPatch } from '../shared/types.ts'
+import { CHANNELS, type ContainerBridge, type ContainerState, type HarnessHomeMode, type PluginMarketState, type RevealTarget, type SettingsPatch } from '../shared/types.ts'
 
 /** The object published as `window.container`. */
 const bridge: ContainerBridge = {
@@ -34,6 +34,11 @@ const bridge: ContainerBridge = {
   revealClientUpdate: () => ipcRenderer.invoke(CHANNELS.revealClientUpdate) as Promise<void>,
   openClientRelease: () => ipcRenderer.invoke(CHANNELS.openClientRelease) as Promise<void>,
   testNotification: () => ipcRenderer.invoke(CHANNELS.testNotification) as Promise<boolean>,
+  pluginMarketSnapshot: () => ipcRenderer.invoke(CHANNELS.pluginMarketSnapshot) as Promise<PluginMarketState>,
+  refreshPluginMarket: () => ipcRenderer.invoke(CHANNELS.refreshPluginMarket) as Promise<PluginMarketState>,
+  installPlugin: (id: string) => ipcRenderer.invoke(CHANNELS.installPlugin, id) as Promise<PluginMarketState>,
+  removePlugin: (id: string) => ipcRenderer.invoke(CHANNELS.removePlugin, id) as Promise<PluginMarketState>,
+  openPluginPage: (id: string) => ipcRenderer.invoke(CHANNELS.openPluginPage, id) as Promise<void>,
 }
 
 contextBridge.exposeInMainWorld('container', bridge)

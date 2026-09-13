@@ -1,10 +1,9 @@
 /**
  * Console renderer.
  *
- * The renderer is a pure view over {@link ContainerState}: it holds no state of
- * its own beyond the last snapshot, every list is rebuilt from that snapshot,
- * and every string taken from the state is inserted with `textContent` so a
- * version string from the registry can never become markup.
+ * Lifecycle controls are a view over {@link ContainerState}; the plugin market
+ * keeps only local filters and its on-demand market snapshot. Every external
+ * string is inserted with `textContent`, never as markup.
  */
 
 /** Console copy. The Harness UI owns its own language; this is only the container shell. */
@@ -73,6 +72,35 @@ const COPY = {
     noInstalled: 'No version installed yet.',
     noRemote: 'No published versions loaded yet.',
     unknown: '—',
+    overviewTab: 'Overview',
+    pluginsTab: 'Plugin market',
+    marketTitle: 'Plugin market',
+    marketSubtitle: 'Browse and manage community plugins for the active Harness profile. Changes restart Harness automatically.',
+    marketInstalled: 'installed',
+    marketUpdates: 'updates',
+    marketSearch: 'Search plugins, authors, or descriptions',
+    marketScopeAll: 'All plugins',
+    marketScopeInstalled: 'Installed',
+    marketScopeUpdates: 'Updates',
+    marketCategoryAll: 'All categories',
+    marketSortStars: 'Most starred',
+    marketSortDownloads: 'Most downloaded',
+    marketSortNewest: 'Newest',
+    marketSortName: 'Name',
+    marketRefresh: 'Refresh catalog',
+    marketRefreshing: 'Loading catalog…',
+    marketReady: (shown, total) => `${shown} of ${total} matching plugins`,
+    marketEmpty: 'No plugins match these filters.',
+    marketLoadMore: (count) => `Show ${count} more`,
+    marketInstall: 'Install',
+    marketUpdate: 'Update',
+    marketRemove: 'Remove',
+    marketDetails: 'Details',
+    marketInstalledVersion: (version) => `Installed ${version}`,
+    marketLatestVersion: (version) => `Latest ${version}`,
+    marketConfirmRemove: (name) => `Remove ${name} from this Harness profile?`,
+    marketWorking: 'Applying the plugin change and restarting Harness…',
+    marketNoCatalog: 'Open the market to load the community catalog.',
     phase: {
       checking: 'Preparing…',
       installing: 'Installing…',
@@ -146,6 +174,35 @@ const COPY = {
     noInstalled: '还没有安装任何版本。',
     noRemote: '尚未获取可安装版本列表。',
     unknown: '—',
+    overviewTab: '运行管理',
+    pluginsTab: '插件市场',
+    marketTitle: '插件市场',
+    marketSubtitle: '浏览并管理当前 Harness 配置中的社区插件。安装、更新或卸载后会自动重启 Harness。',
+    marketInstalled: '已安装',
+    marketUpdates: '可更新',
+    marketSearch: '搜索插件、作者或功能描述',
+    marketScopeAll: '全部插件',
+    marketScopeInstalled: '已安装',
+    marketScopeUpdates: '可更新',
+    marketCategoryAll: '全部分类',
+    marketSortStars: '最多收藏',
+    marketSortDownloads: '最多下载',
+    marketSortNewest: '最近收录',
+    marketSortName: '名称',
+    marketRefresh: '刷新目录',
+    marketRefreshing: '正在加载插件目录…',
+    marketReady: (shown, total) => `匹配 ${total} 个插件，当前显示 ${shown} 个`,
+    marketEmpty: '没有符合当前筛选条件的插件。',
+    marketLoadMore: (count) => `再显示 ${count} 个`,
+    marketInstall: '安装',
+    marketUpdate: '更新',
+    marketRemove: '卸载',
+    marketDetails: '详情',
+    marketInstalledVersion: (version) => `已安装 ${version}`,
+    marketLatestVersion: (version) => `最新版 ${version}`,
+    marketConfirmRemove: (name) => `确定从当前 Harness 配置中卸载 ${name} 吗？`,
+    marketWorking: '正在应用插件变更并重启 Harness…',
+    marketNoCatalog: '打开插件市场后会加载社区插件目录。',
     phase: {
       checking: '准备中…',
       installing: '安装中…',
@@ -191,6 +248,199 @@ const setTransient = (message) => {
   el('detail').textContent = message
 }
 
+let marketState = { catalogLoaded: false, categories: [], plugins: [], installedCount: 0, updateCount: 0 }
+let marketLoading = false
+let marketBusyId = ''
+let marketError = ''
+let marketVisibleLimit = 60
+
+const marketLocale = navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+const compactNumber = new Intl.NumberFormat(marketLocale === 'zh' ? 'zh-CN' : 'en', { notation: 'compact', maximumFractionDigits: 1 })
+
+/** Replace a select's options without losing its current valid choice. */
+const setOptions = (select, options) => {
+  const selected = select.value
+  select.replaceChildren(...options.map((option) => {
+    const element = node('option', '', option.label)
+    element.value = option.value
+    return element
+  }))
+  if (options.some((option) => option.value === selected)) select.value = selected
+}
+
+/** Current market rows after search, scope, category, and sort. */
+const filteredMarketPlugins = () => {
+  const query = el('market-search').value.trim().toLocaleLowerCase()
+  const scope = el('market-scope').value
+  const category = el('market-category').value
+  const sort = el('market-sort').value
+  const filtered = marketState.plugins.filter((plugin) => {
+    if (scope === 'installed' && plugin.installedPackage === undefined) return false
+    if (scope === 'updates' && !plugin.updateAvailable) return false
+    if (category !== 'all' && !plugin.categories.includes(category)) return false
+    if (query === '') return true
+    return [plugin.name, plugin.owner, plugin.description.en, plugin.description.zh]
+      .some((value) => value.toLocaleLowerCase().includes(query))
+  })
+  const compareNumber = (field) => (left, right) => (right[field] ?? -1) - (left[field] ?? -1)
+  if (sort === 'downloads') filtered.sort(compareNumber('downloads'))
+  else if (sort === 'newest') filtered.sort((left, right) => (right.added ?? '').localeCompare(left.added ?? ''))
+  else if (sort === 'name') filtered.sort((left, right) => left.name.localeCompare(right.name))
+  else filtered.sort(compareNumber('stars'))
+  return filtered
+}
+
+/** Install, update, or remove one plugin and surface failures inside the market. */
+const mutateMarket = async (plugin, action) => {
+  if (action === 'remove' && !window.confirm(t.marketConfirmRemove(plugin.name))) return
+  marketBusyId = plugin.id
+  marketError = ''
+  renderMarket()
+  try {
+    marketState = action === 'remove'
+      ? await window.container.removePlugin(plugin.id)
+      : await window.container.installPlugin(plugin.id)
+  } catch (error) {
+    marketError = String(error && error.message ? error.message : error)
+    try {
+      marketState = await window.container.pluginMarketSnapshot()
+    } catch {
+      // Keep the last usable catalog when even the follow-up snapshot fails.
+    }
+  } finally {
+    marketBusyId = ''
+    renderMarket()
+  }
+}
+
+/** Build one native market row. */
+const marketRow = (plugin) => {
+  const article = node('article', 'plugin-row')
+  const content = node('div', 'plugin-content')
+  const heading = node('div', 'plugin-heading')
+  heading.append(node('h3', 'plugin-name', plugin.name))
+  if (plugin.updateAvailable) heading.append(node('span', 'badge tag', t.marketUpdates))
+  else if (plugin.installedPackage !== undefined) heading.append(node('span', 'badge ok', t.marketInstalled))
+  content.append(heading)
+  content.append(node('p', 'plugin-description', plugin.description[marketLocale] || plugin.description.en || plugin.description.zh))
+  const metadata = node('div', 'plugin-meta')
+  if (plugin.owner !== '') metadata.append(node('span', '', `@${plugin.owner}`))
+  if (plugin.stars !== undefined) metadata.append(node('span', '', `★ ${compactNumber.format(plugin.stars)}`))
+  if (plugin.downloads !== undefined) metadata.append(node('span', '', `↓ ${compactNumber.format(plugin.downloads)}`))
+  if (plugin.installedVersion !== undefined) metadata.append(node('span', 'installed-version', t.marketInstalledVersion(plugin.installedVersion)))
+  else if (plugin.version !== undefined) metadata.append(node('span', '', t.marketLatestVersion(plugin.version)))
+  content.append(metadata)
+  article.append(content)
+
+  const actions = node('div', 'plugin-actions')
+  const details = node('button', '', t.marketDetails)
+  details.type = 'button'
+  details.addEventListener('click', () => {
+    void window.container.openPluginPage(plugin.id).catch((error) => {
+      marketError = String(error && error.message ? error.message : error)
+      renderMarket()
+    })
+  })
+  actions.append(details)
+  const busy = marketBusyId !== ''
+  if (plugin.installedPackage === undefined) {
+    const install = node('button', 'primary', marketBusyId === plugin.id ? '…' : t.marketInstall)
+    install.type = 'button'
+    install.disabled = busy
+    install.addEventListener('click', () => { void mutateMarket(plugin, 'install') })
+    actions.append(install)
+  } else {
+    if (plugin.updateAvailable) {
+      const update = node('button', 'primary', marketBusyId === plugin.id ? '…' : t.marketUpdate)
+      update.type = 'button'
+      update.disabled = busy
+      update.addEventListener('click', () => { void mutateMarket(plugin, 'install') })
+      actions.append(update)
+    }
+    const remove = node('button', 'danger', marketBusyId === plugin.id ? '…' : t.marketRemove)
+    remove.type = 'button'
+    remove.disabled = busy
+    remove.addEventListener('click', () => { void mutateMarket(plugin, 'remove') })
+    actions.append(remove)
+  }
+  article.append(actions)
+  return article
+}
+
+/** Render the market from its independent, on-demand IPC snapshot. */
+const renderMarket = () => {
+  setOptions(el('market-scope'), [
+    { value: 'all', label: t.marketScopeAll },
+    { value: 'installed', label: t.marketScopeInstalled },
+    { value: 'updates', label: t.marketScopeUpdates },
+  ])
+  setOptions(el('market-category'), [
+    { value: 'all', label: t.marketCategoryAll },
+    ...marketState.categories.map((category) => ({ value: category.id, label: category[marketLocale] ?? category.en })),
+  ])
+  setOptions(el('market-sort'), [
+    { value: 'stars', label: t.marketSortStars },
+    { value: 'downloads', label: t.marketSortDownloads },
+    { value: 'newest', label: t.marketSortNewest },
+    { value: 'name', label: t.marketSortName },
+  ])
+  el('market-installed-count').textContent = String(marketState.installedCount)
+  el('market-update-count').textContent = String(marketState.updateCount)
+  const error = el('market-error')
+  error.hidden = marketError === ''
+  error.textContent = marketError
+  el('market-refresh').textContent = marketLoading ? t.marketRefreshing : t.marketRefresh
+  el('market-refresh').disabled = marketLoading || marketBusyId !== ''
+
+  const plugins = filteredMarketPlugins()
+  const visible = plugins.slice(0, marketVisibleLimit)
+  const list = el('market-list')
+  list.replaceChildren(...visible.map(marketRow))
+  if (marketLoading && marketState.plugins.length === 0) list.append(node('div', 'market-empty', t.marketRefreshing))
+  else if (!marketLoading && visible.length === 0) list.append(node('div', 'market-empty', t.marketEmpty))
+
+  const status = el('market-status')
+  if (marketBusyId !== '') status.textContent = t.marketWorking
+  else if (marketLoading) status.textContent = t.marketRefreshing
+  else if (!marketState.catalogLoaded) status.textContent = t.marketNoCatalog
+  else status.textContent = t.marketReady(visible.length, plugins.length)
+
+  const more = el('market-more')
+  const remaining = plugins.length - visible.length
+  more.hidden = remaining <= 0
+  more.textContent = t.marketLoadMore(Math.min(60, remaining))
+}
+
+/** Read installed state, optionally followed by a fresh catalog fetch. */
+const loadMarket = async (refresh) => {
+  marketLoading = true
+  marketError = ''
+  renderMarket()
+  try {
+    marketState = refresh
+      ? await window.container.refreshPluginMarket()
+      : await window.container.pluginMarketSnapshot()
+    if (!refresh && !marketState.catalogLoaded) marketState = await window.container.refreshPluginMarket()
+  } catch (error) {
+    marketError = String(error && error.message ? error.message : error)
+  } finally {
+    marketLoading = false
+    renderMarket()
+  }
+}
+
+/** Swap between the lifecycle console and the native plugin market. */
+const showPanel = (name) => {
+  const market = name === 'plugins'
+  el('overview-panel').hidden = market
+  el('plugins-panel').hidden = !market
+  el('overview-tab').classList.toggle('active', !market)
+  el('plugins-tab').classList.toggle('active', market)
+  el('overview-tab').setAttribute('aria-selected', String(!market))
+  el('plugins-tab').setAttribute('aria-selected', String(market))
+  if (market) void loadMarket(false)
+}
+
 /** Render one version row. */
 const versionRow = (version, options) => {
   const row = node('li', 'row')
@@ -214,6 +464,8 @@ const render = (state) => {
   document.title = `${state.productName} ${state.appVersion}`
   el('heading').textContent = state.productName
   el('tagline').textContent = t.tagline
+  el('overview-tab').textContent = t.overviewTab
+  el('plugins-tab').textContent = t.pluginsTab
   const status = el('status')
   status.textContent = t.phase[state.phase] ?? state.phase
   status.dataset.phase = state.phase
@@ -355,6 +607,20 @@ const render = (state) => {
   if (atBottom) log.scrollTop = log.scrollHeight
 }
 
+el('market-title').textContent = t.marketTitle
+el('market-subtitle').textContent = t.marketSubtitle
+el('market-installed-label').textContent = t.marketInstalled
+el('market-update-label').textContent = t.marketUpdates
+el('market-search').placeholder = t.marketSearch
+el('overview-tab').addEventListener('click', () => { showPanel('overview') })
+el('plugins-tab').addEventListener('click', () => { showPanel('plugins') })
+el('market-search').addEventListener('input', () => { marketVisibleLimit = 60; renderMarket() })
+for (const id of ['market-scope', 'market-category', 'market-sort']) {
+  el(id).addEventListener('change', () => { marketVisibleLimit = 60; renderMarket() })
+}
+el('market-refresh').addEventListener('click', () => { void loadMarket(true) })
+el('market-more').addEventListener('click', () => { marketVisibleLimit += 60; renderMarket() })
+
 el('open-harness').addEventListener('click', () => { void call(() => window.container.openHarness()) })
 el('start').addEventListener('click', () => { void call(() => window.container.start()) })
 el('stop').addEventListener('click', () => { void call(() => window.container.stop()) })
@@ -404,6 +670,7 @@ el('notify-on-turn-end').addEventListener('change', (event) => {
 })
 
 window.container.subscribe(render)
+renderMarket()
 void window.container.snapshot().then((state) => {
   render(state)
   document.documentElement.dataset.consoleReady = 'true'

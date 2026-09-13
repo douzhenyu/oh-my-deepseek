@@ -11,7 +11,7 @@
 
 import { app, shell } from 'electron'
 import semver from 'semver'
-import type { ContainerSettings, ContainerState, HarnessHomeMode, InstalledVersion, RevealTarget } from '../shared/types.ts'
+import type { ContainerSettings, ContainerState, HarnessHomeMode, InstalledVersion, PluginMarketState, RevealTarget } from '../shared/types.ts'
 import { BackendService, resolvePort, type BackendInfo } from './backend.ts'
 import { containerConfig } from './config.ts'
 import {
@@ -29,6 +29,7 @@ import { homeForMode, modeOf, seedSeparateHome, sharedHome } from './harness-hom
 import { strings } from './locale.ts'
 import type { ContainerLog } from './log.ts'
 import { paths } from './paths.ts'
+import { PluginMarket } from './plugin-market.ts'
 import { fetchVersions } from './registry.ts'
 import { loadSettings, updateSettings } from './settings.ts'
 import { entryFor, installVersion, listInstalled, removeVersion } from './version-store.ts'
@@ -44,6 +45,7 @@ export interface ContainerEvents {
 /** Owns the harness version, the backend process, and the console-visible state. */
 export class Container {
   private readonly backend: BackendService
+  private readonly plugins: PluginMarket
   private installed: InstalledVersion[] = []
   private state: ContainerState
   private queue: Promise<unknown> = Promise.resolve()
@@ -63,6 +65,10 @@ export class Container {
     this.backend = new BackendService(log, (unexpected, detail) => {
       this.patch({ phase: unexpected ? 'error' : 'stopped', ...(unexpected && detail !== undefined ? { error: detail } : {}) })
     })
+    this.plugins = new PluginMarket(
+      () => this.harnessHomePath(),
+      (text) => { this.log.push('plugins', text) },
+    )
     this.log.onAppend(() => { this.scheduleEmit() })
     this.state = {
       phase: 'checking',
@@ -595,5 +601,70 @@ export class Container {
   async reveal(target: RevealTarget): Promise<void> {
     const directory = target === 'logs' ? paths().logs : target === 'data' ? paths().userData : paths().dshVersions
     await shell.openPath(directory)
+  }
+
+  /** Native plugin-market state without a network request. */
+  pluginMarketSnapshot(): PluginMarketState {
+    return this.plugins.snapshot()
+  }
+
+  /** Fetch the community plugin catalog. */
+  async refreshPluginMarket(): Promise<PluginMarketState> {
+    return await this.plugins.refresh()
+  }
+
+  /**
+   * Apply one profile package mutation while the backend is stopped, then put
+   * the user's previous running/stopped state back exactly as it was.
+   */
+  private mutatePlugin(action: 'install' | 'remove', id: string): Promise<PluginMarketState> {
+    return this.enqueue(async () => {
+      const wasRunning = this.backend.running
+      const activeVersion = this.state.activeVersion ?? this.chooseVersion()
+      const operation = action === 'install' ? strings().pluginInstalling : strings().pluginRemoving
+      if (wasRunning) await this.backend.stop()
+      this.patch({
+        phase: 'installing',
+        detail: operation,
+        progress: { label: operation },
+        error: undefined,
+      })
+      try {
+        const state = action === 'install' ? await this.plugins.install(id) : await this.plugins.remove(id)
+        if (wasRunning && activeVersion !== undefined) await this.startBackend(activeVersion)
+        else this.patch({ phase: 'stopped', detail: undefined, progress: undefined })
+        return state
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.log.push('plugins', `${action} failed: ${message}`)
+        if (wasRunning && activeVersion !== undefined) {
+          try {
+            await this.startBackend(activeVersion)
+          } catch (restartError) {
+            this.fail(restartError)
+          }
+        } else {
+          this.patch({ phase: 'stopped', detail: undefined, progress: undefined })
+        }
+        throw error
+      }
+    })
+  }
+
+  /** Install or update one validated catalog entry. */
+  installPlugin(id: string): Promise<PluginMarketState> {
+    return this.mutatePlugin('install', id)
+  }
+
+  /** Remove one installed catalog entry. */
+  removePlugin(id: string): Promise<PluginMarketState> {
+    return this.mutatePlugin('remove', id)
+  }
+
+  /** Open one validated catalog page in the system browser. */
+  async openPluginPage(id: string): Promise<void> {
+    const page = new URL(this.plugins.page(id))
+    if (page.protocol !== 'https:') throw new Error('插件页面必须使用 HTTPS')
+    await shell.openExternal(page.toString())
   }
 }

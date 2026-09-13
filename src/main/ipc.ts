@@ -67,4 +67,9 @@ export const registerIpc = (container: Container, hooks: { openHarness: () => vo
   ipcMain.handle(CHANNELS.revealClientUpdate, () => { container.revealClientUpdate() })
   ipcMain.handle(CHANNELS.openClientRelease, async () => { await container.openClientRelease() })
   ipcMain.handle(CHANNELS.testNotification, () => hooks.testNotification())
+  ipcMain.handle(CHANNELS.pluginMarketSnapshot, () => container.pluginMarketSnapshot())
+  ipcMain.handle(CHANNELS.refreshPluginMarket, async () => await container.refreshPluginMarket())
+  ipcMain.handle(CHANNELS.installPlugin, async (_event, id: unknown) => await container.installPlugin(asString(id)))
+  ipcMain.handle(CHANNELS.removePlugin, async (_event, id: unknown) => await container.removePlugin(asString(id)))
+  ipcMain.handle(CHANNELS.openPluginPage, async (_event, id: unknown) => { await container.openPluginPage(asString(id)) })
 }

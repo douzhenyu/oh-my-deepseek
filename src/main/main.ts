@@ -149,10 +149,12 @@ if (!smoke && !app.requestSingleInstanceLock()) {
     if (has('--console') && !smoke) windows.showConsole()
     if (smokeReport !== undefined) {
       const install = value('--smoke-install')
+      const plugin = value('--smoke-plugin')
       const homeMode = value('--smoke-home-mode')
       await runSmoke(active, windows, smokeReport, {
         launchMs,
         ...(install === undefined ? {} : { install }),
+        ...(plugin === undefined ? {} : { plugin }),
         ...(homeMode === undefined ? {} : { homeMode }),
         ...(has('--smoke-client-update') ? { clientUpdate: true } : {}),
         ...(has('--smoke-notifications') ? { notifications: true } : {}),

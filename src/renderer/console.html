@@ -15,6 +15,12 @@
       <span id="status" class="pill" data-phase="checking">…</span>
     </header>
 
+    <nav class="console-nav" aria-label="Console sections">
+      <button id="overview-tab" class="nav-tab active" type="button" aria-selected="true"></button>
+      <button id="plugins-tab" class="nav-tab" type="button" aria-selected="false"></button>
+    </nav>
+
+    <main id="overview-panel" class="console-panel">
     <section class="card">
       <div class="card-head">
         <h2 id="backend-title">Backend</h2>
@@ -119,6 +125,36 @@
       <div class="card-head"><h2 id="log-title">Log</h2></div>
       <pre id="log" class="log"></pre>
     </section>
+    </main>
+
+    <main id="plugins-panel" class="console-panel market-panel" hidden>
+      <section class="market-intro">
+        <div>
+          <h2 id="market-title" class="market-title"></h2>
+          <p id="market-subtitle" class="market-subtitle"></p>
+        </div>
+        <div class="market-summary" aria-live="polite">
+          <strong id="market-installed-count">0</strong>
+          <span id="market-installed-label"></span>
+          <span class="summary-divider">·</span>
+          <strong id="market-update-count">0</strong>
+          <span id="market-update-label"></span>
+        </div>
+      </section>
+
+      <section class="market-toolbar" aria-label="Plugin filters">
+        <input id="market-search" class="market-search" type="search" spellcheck="false" />
+        <select id="market-scope"></select>
+        <select id="market-category"></select>
+        <select id="market-sort"></select>
+        <button id="market-refresh" type="button"></button>
+      </section>
+
+      <p id="market-status" class="market-status" aria-live="polite"></p>
+      <p id="market-error" class="error" hidden></p>
+      <section id="market-list" class="market-list" aria-live="polite"></section>
+      <button id="market-more" class="market-more" type="button" hidden></button>
+    </main>
 
     <script src="console.js"></script>
   </body>

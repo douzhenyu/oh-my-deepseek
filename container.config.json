@@ -6,5 +6,16 @@
   "nodeVersion": "24.17.0",
   "dshSeedVersion": "0.1.5-rc.1",
   "defaultPort": 3080,
-  "registry": "https://registry.npmjs.org"
+  "registry": "https://registry.npmjs.org",
+  "webProfile": {
+    "name": "dsh-profile-web",
+    "private": true,
+    "dependencies": {},
+    "dsh": {
+      "profile": {
+        "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"],
+        "patchReload": "live"
+      }
+    }
+  }
 }

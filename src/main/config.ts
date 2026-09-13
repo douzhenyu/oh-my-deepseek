@@ -25,6 +25,13 @@ export interface ContainerConfig {
   defaultPort: number
   /** Package registry used for version discovery and installation. */
   registry: string
+  /** Initial manifest for a web profile that dsh has not created yet. */
+  webProfile: {
+    name: string
+    private: boolean
+    dependencies: Record<string, string>
+    dsh: { profile: { bundles: string[]; patchReload: string } }
+  }
 }
 
 let cached: ContainerConfig | undefined

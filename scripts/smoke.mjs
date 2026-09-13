@@ -16,6 +16,12 @@
  *   npm run smoke -- --client-update         # check and download from the release feed
  *   npm run smoke -- --notifications         # exercise the completion notification
  *   npm run smoke -- --plugin dsh-answer-reviewer # install/remove one plugin and verify restarts
+ *   npm run smoke -- --plugin dsh-answer-reviewer --plugin-from 0.5.2 # update a legacy-store install
+ *   npm run smoke -- --plugin dsh-answer-reviewer --plugin-from 0.5.2 --plugin-pnpm 9.15.9
+ *   npm run smoke -- --plugin dsh-answer-reviewer --plugin-from 0.5.2 --plugin-pnpm 10.28.0 --plugin-virtual-store
+ *   npm run smoke -- --plugin dsh-answer-reviewer --plugin-from 0.5.2 --plugin-missing
+ *   npm run smoke -- --plugin dsh-answer-reviewer --plugin-from 0.5.2 --plugin-pnpm 9.15.9 --plugin-migration-failure
+ *   npm run smoke -- --unlisted-plugin is-number@7.0.0
  */
 
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
@@ -31,6 +37,12 @@ const optionValue = (name) => {
   return index === -1 ? undefined : process.argv[index + 1]
 }
 
+const packageName = (target) => {
+  if (!target.startsWith('@')) return target.split('@', 1)[0]
+  const version = target.indexOf('@', target.indexOf('/') + 1)
+  return version === -1 ? target : target.slice(0, version)
+}
+
 const binaryPath = optionValue('--binary')
 
 const installVersion = optionValue('--install')
@@ -39,6 +51,20 @@ const forcedTheme = optionValue('--theme')
 const clientUpdate = process.argv.includes('--client-update')
 const notifications = process.argv.includes('--notifications')
 const plugin = optionValue('--plugin')
+const pluginFrom = optionValue('--plugin-from')
+const pluginPnpm = optionValue('--plugin-pnpm') ?? '11.20.0'
+const pluginMissing = process.argv.includes('--plugin-missing')
+const pluginVirtualStore = process.argv.includes('--plugin-virtual-store')
+const pluginMigrationFailure = process.argv.includes('--plugin-migration-failure')
+const unlistedPlugin = optionValue('--unlisted-plugin')
+
+if (pluginFrom !== undefined && plugin === undefined) {
+  throw new Error('--plugin-from requires --plugin')
+}
+if (pluginMissing && pluginFrom === undefined) throw new Error('--plugin-missing requires --plugin-from')
+if (pluginMigrationFailure && pluginFrom === undefined) throw new Error('--plugin-migration-failure requires --plugin-from')
+if (pluginVirtualStore && pluginFrom === undefined) throw new Error('--plugin-virtual-store requires --plugin-from')
+if (unlistedPlugin !== undefined && plugin !== undefined) throw new Error('--unlisted-plugin cannot be combined with --plugin')
 
 const keep = process.argv.includes('--keep')
 
@@ -137,6 +163,45 @@ if (binaryPath === undefined) {
   }
 }
 
+if (pluginFrom !== undefined || unlistedPlugin !== undefined) {
+  const profile = join(harnessHome, 'profiles', 'web')
+  const legacyStore = at('.smoke', 'legacy-pnpm-store')
+  const runtime = at('resources', 'node', `${process.platform}-${process.arch}`)
+  const node = process.platform === 'win32' ? join(runtime, 'node.exe') : join(runtime, 'bin', 'node')
+  const corepack = join(runtime, process.platform === 'win32' ? 'node_modules' : join('lib', 'node_modules'), 'corepack', 'dist', 'corepack.js')
+  mkdirSync(profile, { recursive: true })
+  const dependencies = pluginFrom === undefined || pluginMissing ? {} : { [plugin]: pluginFrom }
+  writeFileSync(join(profile, 'package.json'), `${JSON.stringify({
+    ...config.webProfile,
+    dependencies,
+  }, null, 2)}\n`)
+  const seedTarget = unlistedPlugin ?? (pluginMissing ? undefined : `${plugin}@${pluginFrom}`)
+  if (seedTarget !== undefined) {
+    await run(node, [
+      corepack,
+      `pnpm@${pluginPnpm}`,
+      'add',
+      seedTarget,
+      '--dir',
+      profile,
+      '--reporter=append-only',
+      '--store-dir',
+      legacyStore,
+      ...(pluginVirtualStore ? ['--virtual-store-dir', at('.smoke', 'legacy-virtual-store')] : []),
+    ])
+  }
+  if (pluginMissing) {
+    const manifest = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8'))
+    manifest.dependencies[plugin] = pluginFrom
+    writeFileSync(join(profile, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+  }
+  if (pluginMigrationFailure) {
+    const manifest = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8'))
+    manifest.dependencies['oh-my-deepseek-missing-fixture'] = '999.0.0'
+    writeFileSync(join(profile, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+  }
+}
+
 const electron = binaryPath ?? at('node_modules', '.bin', process.platform === 'win32' ? 'electron.cmd' : 'electron')
 console.log(`launching ${binaryPath === undefined ? 'the development container' : 'the packaged application'} headlessly (harness home: ${harnessHome})${installVersion === undefined ? '' : `, then installing dsh ${installVersion}`}`)
 const started = Date.now()
@@ -154,6 +219,10 @@ const child = spawn(electron, [
   ...(clientUpdate ? ['--smoke-client-update'] : []),
   ...(notifications ? ['--smoke-notifications'] : []),
   ...(plugin === undefined ? [] : ['--smoke-plugin', plugin]),
+  ...(pluginFrom === undefined ? [] : ['--smoke-plugin-from', pluginFrom]),
+  ...(pluginMissing ? ['--smoke-plugin-missing'] : []),
+  ...(pluginMigrationFailure ? ['--smoke-plugin-migration-failure'] : []),
+  ...(unlistedPlugin === undefined ? [] : ['--smoke-unlisted-plugin', packageName(unlistedPlugin)]),
 ], {
   cwd: at('.'),
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -259,10 +328,28 @@ if (clientUpdate) {
 if (plugin !== undefined) {
   const market = report.pluginMarket
   check('the native market loaded the community catalog', (market?.catalogCount ?? 0) > 1000, market?.error ?? String(market?.catalogCount))
-  check(`the market installed ${plugin}`, market?.installedVersion !== undefined, market?.installedVersion ?? market?.error ?? '')
-  check('the installed plugin joined the profile bundle stack', market?.installedBundle === true)
-  check('the market removed the test plugin again', market?.removed === true)
-  check('Harness restarted after both plugin changes', market?.restarted === true)
+  if (pluginMigrationFailure) {
+    check('a failed migration restored the original profile', market?.rollbackRestored === true, market?.error ?? '')
+    check('Harness restarted after the failed migration', market?.restarted === true)
+  } else {
+    check(`the market installed ${plugin}`, market?.installedVersion !== undefined, market?.installedVersion ?? market?.error ?? '')
+    check('the installed plugin joined the profile bundle stack', market?.installedBundle === true)
+    check('the market removed the test plugin again', market?.removed === true)
+    check('Harness restarted after both plugin changes', market?.restarted === true)
+  }
+  if (pluginFrom !== undefined && !pluginMigrationFailure) {
+    check(
+      `the market updated ${plugin} from ${pluginFrom} to the catalog version`,
+      market?.installedVersion !== undefined && market.installedVersion === market.catalogVersion,
+      `${market?.installedVersion ?? market?.error ?? 'missing'} / catalog ${market?.catalogVersion ?? 'missing'}`,
+    )
+  }
+  if (pluginMissing && !pluginMigrationFailure) check('a missing declared plugin was offered a repair action', market?.repairOffered === true)
+}
+if (unlistedPlugin !== undefined) {
+  const unlisted = report.unlistedPlugin
+  check('an installed plugin absent from the catalog remained visible', unlisted?.visible === true, unlisted?.error ?? '')
+  check('the unlisted plugin could be removed', unlisted?.removed === true, unlisted?.error ?? '')
 }
 if (homeMode !== undefined) {
   const separate = join(userData, 'harness-home')

@@ -129,6 +129,10 @@ export interface PluginMarketEntry {
   installedPackage?: string
   /** Resolved installed version or dependency spec. */
   installedVersion?: string
+  /** The manifest declares this dependency but its installed package is missing. */
+  repairRequired?: boolean
+  /** Whether this entry came from the current community catalog. */
+  catalogued: boolean
   /** Whether the catalog version is newer than the installed semantic version. */
   updateAvailable: boolean
 }
@@ -143,7 +147,7 @@ export interface PluginMarketState {
   categories: PluginMarketCategory[]
   /** Validated catalog entries with installed state. */
   plugins: PluginMarketEntry[]
-  /** Installed entries that were matched to the catalog. */
+  /** Installed direct dependencies, including entries no longer in the catalog. */
   installedCount: number
   /** Installed entries whose published semantic version is newer. */
   updateCount: number

@@ -93,10 +93,13 @@ const COPY = {
     marketEmpty: 'No plugins match these filters.',
     marketLoadMore: (count) => `Show ${count} more`,
     marketInstall: 'Install',
+    marketRepair: 'Repair',
     marketUpdate: 'Update',
     marketRemove: 'Remove',
     marketDetails: 'Details',
     marketInstalledVersion: (version) => `Installed ${version}`,
+    marketDeclaredVersion: (version) => `Declared ${version} · files missing`,
+    marketNeedsRepair: 'needs repair',
     marketLatestVersion: (version) => `Latest ${version}`,
     marketConfirmRemove: (name) => `Remove ${name} from this Harness profile?`,
     marketWorking: 'Applying the plugin change and restarting Harness…',
@@ -195,10 +198,13 @@ const COPY = {
     marketEmpty: '没有符合当前筛选条件的插件。',
     marketLoadMore: (count) => `再显示 ${count} 个`,
     marketInstall: '安装',
+    marketRepair: '修复',
     marketUpdate: '更新',
     marketRemove: '卸载',
     marketDetails: '详情',
     marketInstalledVersion: (version) => `已安装 ${version}`,
+    marketDeclaredVersion: (version) => `声明版本 ${version} · 文件缺失`,
+    marketNeedsRepair: '需要修复',
     marketLatestVersion: (version) => `最新版 ${version}`,
     marketConfirmRemove: (name) => `确定从当前 Harness 配置中卸载 ${name} 吗？`,
     marketWorking: '正在应用插件变更并重启 Harness…',
@@ -319,7 +325,8 @@ const marketRow = (plugin) => {
   const content = node('div', 'plugin-content')
   const heading = node('div', 'plugin-heading')
   heading.append(node('h3', 'plugin-name', plugin.name))
-  if (plugin.updateAvailable) heading.append(node('span', 'badge tag', t.marketUpdates))
+  if (plugin.repairRequired) heading.append(node('span', 'badge tag', t.marketNeedsRepair))
+  else if (plugin.updateAvailable) heading.append(node('span', 'badge tag', t.marketUpdates))
   else if (plugin.installedPackage !== undefined) heading.append(node('span', 'badge ok', t.marketInstalled))
   content.append(heading)
   content.append(node('p', 'plugin-description', plugin.description[marketLocale] || plugin.description.en || plugin.description.zh))
@@ -327,21 +334,29 @@ const marketRow = (plugin) => {
   if (plugin.owner !== '') metadata.append(node('span', '', `@${plugin.owner}`))
   if (plugin.stars !== undefined) metadata.append(node('span', '', `★ ${compactNumber.format(plugin.stars)}`))
   if (plugin.downloads !== undefined) metadata.append(node('span', '', `↓ ${compactNumber.format(plugin.downloads)}`))
-  if (plugin.installedVersion !== undefined) metadata.append(node('span', 'installed-version', t.marketInstalledVersion(plugin.installedVersion)))
+  if (plugin.installedVersion !== undefined) {
+    metadata.append(node(
+      'span',
+      'installed-version',
+      plugin.repairRequired ? t.marketDeclaredVersion(plugin.installedVersion) : t.marketInstalledVersion(plugin.installedVersion),
+    ))
+  }
   else if (plugin.version !== undefined) metadata.append(node('span', '', t.marketLatestVersion(plugin.version)))
   content.append(metadata)
   article.append(content)
 
   const actions = node('div', 'plugin-actions')
-  const details = node('button', '', t.marketDetails)
-  details.type = 'button'
-  details.addEventListener('click', () => {
-    void window.container.openPluginPage(plugin.id).catch((error) => {
-      marketError = String(error && error.message ? error.message : error)
-      renderMarket()
+  if (plugin.catalogued) {
+    const details = node('button', '', t.marketDetails)
+    details.type = 'button'
+    details.addEventListener('click', () => {
+      void window.container.openPluginPage(plugin.id).catch((error) => {
+        marketError = String(error && error.message ? error.message : error)
+        renderMarket()
+      })
     })
-  })
-  actions.append(details)
+    actions.append(details)
+  }
   const busy = marketBusyId !== ''
   if (plugin.installedPackage === undefined) {
     const install = node('button', 'primary', marketBusyId === plugin.id ? '…' : t.marketInstall)
@@ -350,8 +365,9 @@ const marketRow = (plugin) => {
     install.addEventListener('click', () => { void mutateMarket(plugin, 'install') })
     actions.append(install)
   } else {
-    if (plugin.updateAvailable) {
-      const update = node('button', 'primary', marketBusyId === plugin.id ? '…' : t.marketUpdate)
+    if (plugin.repairRequired || plugin.updateAvailable) {
+      const label = plugin.repairRequired ? t.marketRepair : t.marketUpdate
+      const update = node('button', 'primary', marketBusyId === plugin.id ? '…' : label)
       update.type = 'button'
       update.disabled = busy
       update.addEventListener('click', () => { void mutateMarket(plugin, 'install') })

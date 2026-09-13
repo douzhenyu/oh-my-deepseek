@@ -171,11 +171,20 @@ if (!smoke && !app.requestSingleInstanceLock()) {
     if (smokeReport !== undefined) {
       const install = value('--smoke-install')
       const plugin = value('--smoke-plugin')
+      const pluginFrom = value('--smoke-plugin-from')
+      const unlistedPlugin = value('--smoke-unlisted-plugin')
       const homeMode = value('--smoke-home-mode')
+      const pluginScenario = plugin === undefined ? undefined : {
+        name: plugin,
+        ...(pluginFrom === undefined ? {} : { updateFrom: pluginFrom }),
+        ...(has('--smoke-plugin-missing') ? { missing: true } : {}),
+        ...(has('--smoke-plugin-migration-failure') ? { expectMigrationFailure: true } : {}),
+      }
       await runSmoke(active, windows, smokeReport, {
         launchMs,
         ...(install === undefined ? {} : { install }),
-        ...(plugin === undefined ? {} : { plugin }),
+        ...(pluginScenario === undefined ? {} : { plugin: pluginScenario }),
+        ...(unlistedPlugin === undefined ? {} : { unlistedPlugin }),
         ...(homeMode === undefined ? {} : { homeMode }),
         ...(has('--smoke-client-update') ? { clientUpdate: true } : {}),
         ...(has('--smoke-notifications') ? { notifications: true } : {}),

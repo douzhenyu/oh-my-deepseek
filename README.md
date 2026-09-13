@@ -81,6 +81,7 @@ DeepSeek Harness（`dsh`）的**跨平台桌面客户端容器**：把 harness �
 - 支持 npm 包、GitHub 仓库和目录中经过校验的 GitHub Release 压缩包
 - 安装、更新和卸载前会停止后台，完成后恢复原先的运行状态，避免配置与正在运行的 profile 互相争用
 - 包管理不调用系统 `pnpm`：客户端通过自带 Node 的 Corepack 运行固定版本的 pnpm，所以 Windows 用户也不需要先配置命令行环境
+- 旧 profile 首次变更插件时会迁移到客户端自己的 pnpm Store；迁移期间保留原 `node_modules`、清单和锁文件，失败会完整恢复
 - 安装完成后，客户端会根据插件 `package.json` 中的 `dsh.bundle.patch` 自动维护 `dsh.profile.bundles`
 
 ### 对话完成的系统通知

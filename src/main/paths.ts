@@ -3,8 +3,8 @@
  *
  * Two roots matter and they are deliberately different: `resources` is
  * read-only application content that ships with the install, while `userData`
- * is the writable directory that survives upgrades and is the only place a
- * package operation ever writes.
+ * holds app-managed runtimes and package stores. Profile package operations
+ * also update the selected Harness home, which may be shared with the dsh CLI.
  * @module main/paths
  */
 

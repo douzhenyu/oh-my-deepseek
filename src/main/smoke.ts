@@ -128,12 +128,16 @@ export interface SmokeReport {
     ok: boolean
     catalogCount?: number
     plugin?: string
+    catalogVersion?: string
     installedVersion?: string
     installedBundle?: boolean
     removed?: boolean
     restarted?: boolean
+    repairOffered?: boolean
+    rollbackRestored?: boolean
     error?: string
   }
+  unlistedPlugin?: { visible?: boolean; removed?: boolean; error?: string }
   install?: {
     version: string
     ok: boolean
@@ -433,16 +437,50 @@ const installAndSwitch = async (
  */
 const exercisePluginMarket = async (
   container: Container,
-  pluginName: string,
+  scenario: { name: string; updateFrom?: string; missing?: boolean; expectMigrationFailure?: boolean },
 ): Promise<NonNullable<SmokeReport['pluginMarket']>> => {
+  const pluginName = scenario.name
+  const updateFrom = scenario.updateFrom
   const result: NonNullable<SmokeReport['pluginMarket']> = { ok: false, plugin: pluginName }
   try {
     const catalog = await container.refreshPluginMarket()
     result.catalogCount = catalog.plugins.length
     const plugin = catalog.plugins.find((entry) => entry.name === pluginName)
     if (plugin === undefined) throw new Error(`the catalog has no plugin named ${pluginName}`)
-    if (plugin.installedPackage !== undefined) throw new Error(`${pluginName} was already installed in the isolated smoke home`)
+    result.catalogVersion = plugin.version
+    if (scenario.missing === true) result.repairOffered = plugin.repairRequired === true
+    if (updateFrom === undefined && plugin.installedPackage !== undefined) {
+      throw new Error(`${pluginName} was already installed in the isolated smoke home`)
+    }
+    if (updateFrom !== undefined && plugin.installedVersion !== updateFrom) {
+      throw new Error(`expected ${pluginName} ${updateFrom} before the update, got ${String(plugin.installedVersion)}`)
+    }
     const beforePid = container.snapshot().backendPid
+    if (scenario.expectMigrationFailure === true) {
+      const profile = join(container.harnessHomePath(), 'profiles', 'web')
+      const packageFile = join(profile, 'package.json')
+      const lockFile = join(profile, 'pnpm-lock.yaml')
+      const workspaceFile = join(profile, 'pnpm-workspace.yaml')
+      const beforePackage = readFileSync(packageFile, 'utf8')
+      const beforeLock = existsSync(lockFile) ? readFileSync(lockFile, 'utf8') : undefined
+      const beforeWorkspace = existsSync(workspaceFile) ? readFileSync(workspaceFile, 'utf8') : undefined
+      try {
+        await container.installPlugin(plugin.id)
+        throw new Error('the deliberately invalid migration unexpectedly succeeded')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (!message.includes('原文件已恢复')) throw error
+      }
+      const installed = JSON.parse(readFileSync(join(profile, 'node_modules', pluginName, 'package.json'), 'utf8')) as { version?: string }
+      result.rollbackRestored = readFileSync(packageFile, 'utf8') === beforePackage
+        && (existsSync(lockFile) ? readFileSync(lockFile, 'utf8') : undefined) === beforeLock
+        && (existsSync(workspaceFile) ? readFileSync(workspaceFile, 'utf8') : undefined) === beforeWorkspace
+        && installed.version === updateFrom
+        && !existsSync(join(profile, '.oh-my-deepseek-pnpm-migration'))
+      result.restarted = container.snapshot().backendPid !== beforePid && container.snapshot().phase === 'ready'
+      result.ok = result.rollbackRestored === true && result.restarted === true
+      return result
+    }
     const installed = await container.installPlugin(plugin.id)
     const installedEntry = installed.plugins.find((entry) => entry.id === plugin.id)
     result.installedVersion = installedEntry?.installedVersion
@@ -461,7 +499,27 @@ const exercisePluginMarket = async (
       && result.installedBundle === true
       && result.removed === true
       && result.restarted === true
+      && (scenario.missing !== true || result.repairOffered === true)
       && container.snapshot().phase === 'ready'
+  } catch (error) {
+    result.error = error instanceof Error ? error.message : String(error)
+  }
+  return result
+}
+
+/** Verify that an installed direct dependency remains manageable after leaving the catalog. */
+const exerciseUnlistedPlugin = async (
+  container: Container,
+  packageName: string,
+): Promise<NonNullable<SmokeReport['unlistedPlugin']>> => {
+  const result: NonNullable<SmokeReport['unlistedPlugin']> = {}
+  try {
+    const market = await container.refreshPluginMarket()
+    const entry = market.plugins.find((plugin) => plugin.installedPackage === packageName)
+    result.visible = entry?.catalogued === false
+    if (entry === undefined) throw new Error(`${packageName} was absent from the installed plugin list`)
+    const removed = await container.removePlugin(entry.id)
+    result.removed = !removed.plugins.some((plugin) => plugin.installedPackage === packageName)
   } catch (error) {
     result.error = error instanceof Error ? error.message : String(error)
   }
@@ -478,7 +536,8 @@ const exercisePluginMarket = async (
  * @param options.notifications - Whether to exercise completion notification.
  * @param options.clientUpdate - Whether to exercise the client's own update path.
  * @param options.install - Version to install and activate, when requested.
- * @param options.plugin - Catalog plugin to install and remove in the isolated smoke home.
+ * @param options.plugin - Catalog plugin scenario to exercise in the isolated smoke home.
+ * @param options.unlistedPlugin - Installed package omitted from the catalog.
  * @param options.homeMode - Harness home to switch to, when requested.
  * @param options.launchMs - How long the initial launch took, measured by the caller.
  * @returns Completion after the report is on disk; the caller then quits.
@@ -487,7 +546,7 @@ export const runSmoke = async (
   container: Container,
   windows: WindowManager,
   reportPath: string,
-  options: { install?: string; plugin?: string; homeMode?: string; clientUpdate?: boolean; notifications?: boolean; launchMs: number },
+  options: { install?: string; plugin?: { name: string; updateFrom?: string; missing?: boolean; expectMigrationFailure?: boolean }; unlistedPlugin?: string; homeMode?: string; clientUpdate?: boolean; notifications?: boolean; launchMs: number },
 ): Promise<void> => {
   const started = Date.now()
   const state = container.snapshot()
@@ -551,8 +610,10 @@ export const runSmoke = async (
     if (options.homeMode !== undefined) report.home = await switchHome(container, windows, options.homeMode)
     if (options.install !== undefined) report.install = await installAndSwitch(container, windows, options.install)
     if (options.plugin !== undefined) report.pluginMarket = await exercisePluginMarket(container, options.plugin)
+    if (options.unlistedPlugin !== undefined) report.unlistedPlugin = await exerciseUnlistedPlugin(container, options.unlistedPlugin)
     report.ok = (report.install === undefined || report.install.ok)
       && (report.pluginMarket === undefined || report.pluginMarket.ok)
+      && (report.unlistedPlugin === undefined || (report.unlistedPlugin.visible === true && report.unlistedPlugin.removed === true))
     if (!report.ok) report.error = report.install?.error ?? report.pluginMarket?.error ?? 'an optional smoke scenario failed'
   } catch (error) {
     report.error = error instanceof Error ? `${error.message}` : String(error)

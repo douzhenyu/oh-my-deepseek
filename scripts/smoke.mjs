@@ -216,6 +216,9 @@ check(
 )
 check(`the console is branded "${config.productName}"`, report.console?.heading === config.productName, report.console?.heading ?? '')
 check('the Harness page booted', report.page !== undefined && report.page.mode !== 'queue', JSON.stringify(report.page ?? {}))
+check('closing the Harness window keeps it available in the background', report.background?.windowRetained === true)
+check('closing the Harness window keeps the backend running', report.background?.backendRetained === true)
+check('the hidden Harness window can be restored', report.background?.restored === true)
 check('unauthenticated requests are rejected', report.http?.rootWithoutCookie === 401, `status ${String(report.http?.rootWithoutCookie)}`)
 check('the one-time token URL is honoured', report.http?.tokenHandoff === 303, `status ${String(report.http?.tokenHandoff)}`)
 if (notifications) {

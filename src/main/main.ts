@@ -2,9 +2,9 @@
  * Application entry point.
  *
  * The wiring here is deliberately small: create the log, the windows, and the
- * container, then make sure that every way this process can end — a closed
- * window, a menu quit, a signal, an unhandled `exit` — stops the harness
- * process group first.
+ * container, then separate hiding windows from deliberately quitting. Every
+ * real exit — menu/tray Quit, update install, signal, or unhandled `exit` —
+ * still stops the harness process group first.
  * @module main
  */
 
@@ -22,6 +22,7 @@ import { strings } from './locale.ts'
 import { buildMenu } from './menu.ts'
 import { overridePaths, paths } from './paths.ts'
 import { runSmoke } from './smoke.ts'
+import { TrayController } from './tray.ts'
 import { WindowManager } from './windows.ts'
 import { CHANNELS } from '../shared/types.ts'
 
@@ -73,13 +74,23 @@ if (!smoke && !app.requestSingleInstanceLock()) {
   let container: Container | undefined
   let windows: WindowManager | undefined
   let watcher: CompletionWatcher | undefined
+  let tray: TrayController | undefined
   let quitting = false
+
+  /** Restore the primary UI from the Dock, tray, or a second launch. */
+  const restorePrimary = (): void => {
+    if (windows?.focusHarness() !== true) windows?.showConsole()
+  }
 
   const main = async (): Promise<void> => {
     log.open()
     app.setAboutPanelOptions({ applicationName: containerConfig().productName, applicationVersion: app.getVersion() })
     log.push('container', `${containerConfig().productName} ${app.getVersion()} starting (electron ${process.versions.electron}, node ${process.versions.node})`)
-    windows = new WindowManager({ headless: smoke })
+    windows = new WindowManager({
+      headless: smoke,
+      shouldHideOnClose: () => !quitting,
+      onAllHidden: () => { tray?.announceBackground() },
+    })
     container = new Container(log, {
       onChange: (state) => { windows?.broadcast(CHANNELS.state, state) },
       onReady: (info) => {
@@ -90,6 +101,16 @@ if (!smoke && !app.requestSingleInstanceLock()) {
       },
     })
     const active = container
+    if (!smoke) {
+      tray = new TrayController({
+        openHarness: restorePrimary,
+        showConsole: () => { windows?.showConsole() },
+        restartBackend: () => { void active.startBackendNow() },
+        stopBackend: () => { void active.stopBackend() },
+        quit: () => { app.quit() },
+      })
+      tray.start()
+    }
     registerIpc(active, {
       openHarness: () => { windows?.focusHarness() },
       testNotification: () => {
@@ -163,16 +184,20 @@ if (!smoke && !app.requestSingleInstanceLock()) {
     }
   }
 
-  // Closing the client closes the backend. The container deliberately does not
-  // keep running with a live backend after its last window is gone, not even on
-  // macOS, because a windowless process still holding a harness would be
-  // indistinguishable from a leak.
-  app.on('window-all-closed', () => { app.quit() })
+  // Normal window close requests are intercepted by WindowManager and hidden.
+  // If a renderer crashes and actually destroys every window, keep the process
+  // reachable through the Windows tray or macOS Dock so the UI can be rebuilt.
+  app.on('window-all-closed', () => { if (quitting) app.quit() })
+
+  // Clicking the macOS Dock icon after every window was hidden should restore
+  // the same primary view as the Windows tray icon.
+  app.on('activate', restorePrimary)
 
   app.on('before-quit', (event) => {
     if (quitting || container === undefined) return
     quitting = true
     event.preventDefault()
+    tray?.destroy()
     watcher?.stop()
     void container.shutdown().finally(() => {
       log.push('container', 'backend stopped; quitting')
@@ -182,8 +207,7 @@ if (!smoke && !app.requestSingleInstanceLock()) {
   })
 
   app.on('second-instance', () => {
-    windows?.focusHarness()
-    windows?.showConsole()
+    restorePrimary()
   })
 
   const emergencyStop = (reason: string): void => {

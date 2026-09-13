@@ -82,6 +82,11 @@ export interface SmokeReport {
   page?: PageProbe
   console?: ConsoleProbe
   consoleAppearance?: AppearanceProbe
+  background?: {
+    windowRetained: boolean
+    backendRetained: boolean
+    restored: boolean
+  }
   http?: { rootWithoutCookie: number; tokenHandoff: number }
   launchMs: number
   home?: {
@@ -518,6 +523,19 @@ export const runSmoke = async (
     if (http.rootWithoutCookie !== 401) throw new Error(`an unauthenticated request returned ${String(http.rootWithoutCookie)}, expected 401`)
     if (http.tokenHandoff !== 303) throw new Error(`the token hand-off returned ${String(http.tokenHandoff)}, expected 303`)
     if (page.title.trim() === '') throw new Error('the Harness page has no title')
+    // The native close button is a background action. Exercise the actual
+    // BrowserWindow close event, prove it neither destroys the window nor stops
+    // the backend, then restore the same window through its authenticated URL.
+    const backgroundPid = container.snapshot().backendPid
+    windows.closeHarness()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const windowRetained = windows.harnessOpen
+    const backendRetained = container.backendRunning && container.snapshot().backendPid === backgroundPid
+    const restoreInfo = container.backendInfo
+    if (restoreInfo !== undefined) await windows.openHarness(restoreInfo.url)
+    const restored = windowRetained && (await waitForBoot(windows, 30_000)).bodyLength > 500
+    report.background = { windowRetained, backendRetained, restored }
+    if (!windowRetained || !backendRetained || !restored) throw new Error('closing the Harness window did not preserve and restore the background session')
     // The client chrome must follow the operating system's scheme: a dark panel
     // under a light menu bar was the reported defect.
     const appearance = await windows.evaluateConsole<AppearanceProbe>(

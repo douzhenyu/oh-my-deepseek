@@ -74,6 +74,10 @@ interface Strings {
   turnComplete: string
   /** Body of an on-demand test notification. */
   turnCompleteTest: string
+  /** Windows tray balloon title shown after the first hidden close. */
+  backgroundTitle: string
+  /** Windows tray balloon body explaining how to reopen the application. */
+  backgroundBody: string
   /** Status text per lifecycle phase. */
   phase: Record<string, string>
   /** Native menu labels. */
@@ -90,12 +94,13 @@ interface Strings {
     windowMenu: string
     helpMenu: string
     documentation: string
+    quit: string
   }
 }
 
 const en: Strings = {
   consoleTitle: 'Console',
-  tagline: 'The harness runs inside this application. Closing it stops the backend.',
+  tagline: 'Closing a window keeps Harness running in the background. Use Quit to stop it.',
   backendSection: 'Backend',
   versionSection: 'Harness version',
   advancedSection: 'Advanced',
@@ -126,6 +131,8 @@ const en: Strings = {
   notifyOnTurnEnd: 'Notify me when a conversation finishes',
   turnComplete: 'The reply is ready.',
   turnCompleteTest: 'Test notification — if you can see this, notifications work.',
+  backgroundTitle: 'Still running in the background',
+  backgroundBody: 'Click the tray icon to reopen Harness, or right-click it for the console and Quit.',
   phase: {
     checking: 'Preparing…',
     installing: 'Installing…',
@@ -147,12 +154,13 @@ const en: Strings = {
     windowMenu: 'Window',
     helpMenu: 'Help',
     documentation: 'DeepSeek Harness Documentation',
+    quit: 'Quit',
   },
 }
 
 const zh: Strings = {
   consoleTitle: '控制台',
-  tagline: 'Harness 运行在本客户端内。关闭客户端会同时结束后台进程。',
+  tagline: '关闭窗口后 Harness 会继续在后台运行；选择“退出”才会停止。',
   backendSection: '后台服务',
   versionSection: 'Harness 版本',
   advancedSection: '高级',
@@ -183,6 +191,8 @@ const zh: Strings = {
   notifyOnTurnEnd: '对话完成后发送系统通知',
   turnComplete: '回复已完成。',
   turnCompleteTest: '这是一条测试通知——能看到就说明通知正常。',
+  backgroundTitle: '客户端仍在后台运行',
+  backgroundBody: '单击托盘图标可重新打开 Harness；右键可打开控制台或退出。',
   phase: {
     checking: '准备中…',
     installing: '安装中…',
@@ -204,6 +214,7 @@ const zh: Strings = {
     windowMenu: '窗口',
     helpMenu: '帮助',
     documentation: 'DeepSeek Harness 文档',
+    quit: '退出',
   },
 }
 

@@ -1,6 +1,6 @@
 # oh-my-deepseek
 
-DeepSeek Harness（`dsh`）的**跨平台桌面客户端容器**：把 harness 装进一个客户端里，用户双击打开就能用，不需要命令行、不需要 `pnpm dsh web`；关闭客户端时后台进程随之结束。
+DeepSeek Harness（`dsh`）的**跨平台桌面客户端容器**：把 harness 装进一个客户端里，用户双击打开就能用，不需要命令行、不需要 `pnpm dsh web`；关闭窗口后继续在后台运行，明确选择「退出」时才停止后台进程。
 
 支持 **macOS** 与 **Windows**。
 
@@ -50,7 +50,7 @@ DeepSeek Harness（`dsh`）的**跨平台桌面客户端容器**：把 harness �
 | --- | --- |
 | 要自己装 Node.js | 客户端自带官方上游 Node.js 运行时，用户机器上不需要任何 Node |
 | 要在终端敲 `pnpm dsh web` | 打开客户端自动启动后端，就绪后自动加载界面 |
-| 关掉终端后端还在跑 | 关闭最后一个窗口即退出，并且后端进程组被回收（含异常崩溃路径） |
+| 关闭窗口会打断正在进行的任务 | 关闭按钮只隐藏窗口；从菜单或托盘明确退出时才回收整个后端进程组 |
 | 升级 dsh 要懂 npm | 客户端内"Harness 版本"面板直接安装/切换/删除版本 |
 | 安装插件要在终端执行 `dsh plugin` | 客户端内置插件市场，搜索、安装、更新、卸载都在界面完成 |
 | 版本混乱 | 每个版本独立目录，随时切回旧版本；内置版本只读，升级只写用户数据目录 |
@@ -129,7 +129,7 @@ DeepSeek Harness（`dsh`）的**跨平台桌面客户端容器**：把 harness �
 
 客户端外壳（控制台窗口、窗口背景）跟随**系统**的浅色/深色设置——和 harness UI 自身的行为一致（它的主题偏好默认就是跟随系统）。
 
-关闭客户端 = 停止后端。macOS 上也一样（不保留无窗口的后台进程，避免"看不见的进程还占着 harness"）。
+关闭窗口不会停止 Harness：macOS 可从 Dock 或应用菜单重新打开，Windows 可单击通知区域的托盘图标重新打开，右键托盘图标还能直接进入控制台、重启/停止后台或退出。只有选择「退出」才会停止后端并回收进程树。
 
 ---
 
@@ -183,7 +183,7 @@ npm run console    # 启动并额外打开控制台窗口
 
 | 层 | 触发条件 | 行为 |
 | --- | --- | --- |
-| Electron `before-quit` | 正常退出、菜单退出、关最后一个窗口 | 异步优雅停止：先 SIGTERM 进程组，8s 未退再 SIGKILL |
+| Electron `before-quit` | 菜单退出、托盘退出、安装客户端更新 | 异步优雅停止：先 SIGTERM 进程组，8s 未退再 SIGKILL |
 | `supervisor.mjs` 父进程轮询 | 主进程被 `SIGKILL`、崩溃，没有任何清理代码能跑 | 每 500ms 检查父进程存活（POSIX 看 `ppid` 是否被 reparent，Windows 用零信号探测），父进程消失即回收整个进程组 |
 | `process.on('exit')` + 信号处理 | 主进程正常退出但没走到 `before-quit`、收到 SIGINT/SIGTERM | 同步杀进程组兜底 |
 
@@ -348,6 +348,7 @@ npm run verify:crash              # 主进程被 SIGKILL 后不留残留
 - 容器进入 `ready`
 - **控制台窗口通过 preload 桥真实渲染**（防止 CSP / preload 静默失效）
 - **Harness 页面真的启动**（`__ModuleLoader__.mode` 离开 `queue`、body 已渲染）
+- 关闭 Harness 窗口后窗口对象仍保留、后台 PID 不变，并能恢复同一页面
 - 未带 cookie 的请求返回 401（服务在跑且鉴权围栏生效）
 - 一次性 token URL 返回 303（交接链路生效）
 - 退出码为 0
@@ -422,6 +423,7 @@ electron-builder.config.mjs    按 target 生成的打包配置 + afterPack 资�
 src/
   main/
     main.ts                    应用入口、退出与信号编排
+    tray.ts                    Windows 通知区域图标与后台入口
     container.ts               状态机：版本选择、启动、安装/激活/删除
     backend.ts                 启动 supervisor、解析就绪行、回收进程组
     version-store.ts           版本发现、npm 安装（staging + 原子改名）、删除

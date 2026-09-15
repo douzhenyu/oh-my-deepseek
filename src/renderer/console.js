@@ -597,7 +597,7 @@ const render = (state) => {
     if (state.activeVersion !== entry.version || !ready) {
       actions.push({ label: t.use, kind: 'primary', run: () => window.container.activate(entry.version) })
     }
-    if (entry.source === 'installed') {
+    if (entry.source === 'installed' || state.activeVersion !== entry.version) {
       actions.push({ label: t.delete, kind: 'danger', run: () => window.container.remove(entry.version) })
     }
     installedList.append(versionRow(entry.version, { badges, actions }))

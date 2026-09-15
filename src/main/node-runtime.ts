@@ -10,7 +10,7 @@
  */
 
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { containerConfig } from './config.ts'
 import { paths } from './paths.ts'
 
@@ -91,15 +91,21 @@ export const profilePackageManager = (version: string): RuntimeCommand => {
  * an install never reads or writes the developer's own npm state.
  * @returns Environment variables layered over the current process environment.
  */
-export const packageEnvironment = (): NodeJS.ProcessEnv => ({
-  ...process.env,
-  npm_config_cache: paths().npmCache,
-  npm_config_userconfig: paths().npmUserConfig,
-  npm_config_update_notifier: 'false',
-  npm_config_fund: 'false',
-  npm_config_audit: 'false',
-  npm_config_progress: 'false',
-  npm_config_loglevel: 'error',
-  npm_config_node_version: containerConfig().nodeVersion,
-  NODE_OPTIONS: '',
-})
+export const packageEnvironment = (): NodeJS.ProcessEnv => {
+  const runtime = nodeRuntime()
+  return {
+    ...process.env,
+    PATH: runtime.source === 'bundled'
+      ? [dirname(runtime.command), process.env['PATH']].filter(Boolean).join(delimiter)
+      : process.env['PATH'],
+    npm_config_cache: paths().npmCache,
+    npm_config_userconfig: paths().npmUserConfig,
+    npm_config_update_notifier: 'false',
+    npm_config_fund: 'false',
+    npm_config_audit: 'false',
+    npm_config_progress: 'false',
+    npm_config_loglevel: 'error',
+    npm_config_node_version: containerConfig().nodeVersion,
+    NODE_OPTIONS: '',
+  }
+}

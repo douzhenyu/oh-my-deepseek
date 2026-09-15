@@ -32,7 +32,7 @@ import { paths } from './paths.ts'
 import { PluginMarket } from './plugin-market.ts'
 import { fetchVersions } from './registry.ts'
 import { loadSettings, updateSettings } from './settings.ts'
-import { entryFor, installVersion, listInstalled, removeVersion } from './version-store.ts'
+import { installVersion, listInstalled, removeVersion } from './version-store.ts'
 
 /** What the container needs from the window layer. */
 export interface ContainerEvents {
@@ -180,8 +180,12 @@ export class Container {
 
   /** Refresh the installed list and publish it. */
   private refreshInstalled(): void {
-    this.installed = listInstalled()
-    this.patch({ installed: [...this.installed] })
+    const hidden = loadSettings().hiddenBundledVersion
+    this.installed = listInstalled().filter((entry) => entry.source !== 'bundled' || entry.version !== hidden)
+    this.patch({
+      installed: [...this.installed],
+      bundledVersion: this.installed.find((entry) => entry.source === 'bundled')?.version,
+    })
   }
 
   /**
@@ -201,8 +205,6 @@ export class Container {
       harnessHomeMode: modeOf(this.effectiveHome()),
     })
     this.refreshInstalled()
-    const bundled = this.installed.find((candidate) => candidate.source === 'bundled')?.version
-    this.patch({ ...(bundled === undefined ? {} : { bundledVersion: bundled }) })
     if (settings.checkUpdatesOnLaunch) void this.refreshRemote()
     if (settings.checkClientUpdatesOnLaunch) void this.checkClientUpdate()
     if (!settings.autoStart) {
@@ -225,7 +227,7 @@ export class Container {
    */
   private chooseVersion(): string | undefined {
     const stored = loadSettings().activeVersion
-    if (stored !== undefined && entryFor(stored) !== undefined) return stored
+    if (stored !== undefined && this.installed.some((entry) => entry.version === stored)) return stored
     const bundled = this.installed.find((candidate) => candidate.source === 'bundled')?.version
     if (bundled !== undefined) return bundled
     return this.installed[0]?.version
@@ -322,6 +324,7 @@ export class Container {
         error: undefined,
       })
       try {
+        if (loadSettings().hiddenBundledVersion === version) updateSettings({ hiddenBundledVersion: undefined })
         await installVersion(version, (text) => { this.log.push('npm', text) }, undefined)
         this.refreshInstalled()
         updateSettings({ activeVersion: version })
@@ -339,7 +342,7 @@ export class Container {
    */
   activate(version: string): Promise<void> {
     return this.enqueue(async () => {
-      if (entryFor(version) === undefined) {
+      if (!this.installed.some((entry) => entry.version === version)) {
         this.fail(new Error(`dsh ${version} is not installed`))
         return
       }
@@ -353,17 +356,25 @@ export class Container {
   }
 
   /**
-   * Delete a version installed in user data, restarting when it was running.
+   * Delete a version installed in user data, or hide an inactive bundled version.
    * @param version - Exact version to delete.
    * @returns Completion once the version is gone.
    */
   remove(version: string): Promise<void> {
     return this.enqueue(async () => {
       try {
+        const entry = this.installed.find((candidate) => candidate.version === version)
+        if (entry === undefined) throw new Error(`dsh ${version} is not installed`)
         const wasActive = this.state.activeVersion === version
+        if (entry.source === 'bundled' && wasActive) throw new Error('the active bundled dsh version cannot be removed')
         if (wasActive && this.backend.running) await this.backend.stop()
-        removeVersion(version)
-        this.log.push('container', `deleted dsh ${version}`)
+        if (entry.source === 'bundled') {
+          updateSettings({ hiddenBundledVersion: version })
+          this.log.push('container', `removed bundled dsh ${version} from the selectable versions`)
+        } else {
+          removeVersion(version)
+          this.log.push('container', `deleted dsh ${version}`)
+        }
         if (wasActive) updateSettings({ activeVersion: undefined })
         this.refreshInstalled()
         if (wasActive) {

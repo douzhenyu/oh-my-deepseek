@@ -215,6 +215,8 @@ export interface ContainerState {
 export interface ContainerSettings {
   /** Version to start, or absent to follow the bundled version then the newest installed one. */
   activeVersion?: string
+  /** Bundled version removed from the selectable list; the read-only fallback stays in the signed app. */
+  hiddenBundledVersion?: string
   /** Loopback port to prefer; a busy port is replaced for that launch only. */
   port: number
   /** Whether to start the backend during launch. */
@@ -297,7 +299,7 @@ export interface ContainerBridge {
   install(version: string): Promise<void>
   /** Activate a version and restart the backend on it. */
   activate(version: string): Promise<void>
-  /** Delete a user-installed version; refuses for the bundled one. */
+  /** Delete a user-installed version or hide an inactive bundled version. */
   remove(version: string): Promise<void>
   /** Start the backend if it is not running. */
   start(): Promise<void>

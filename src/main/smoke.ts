@@ -424,6 +424,17 @@ const installAndSwitch = async (
     const page = await waitForBoot(windows, 60_000)
     result.pageAfterSwitch = page
     if (page.mode === 'queue') throw new Error('the Harness page did not reboot after the version switch')
+    const bundled = after.installed.find((entry) => entry.source === 'bundled')
+    if (bundled !== undefined && bundled.version !== version) {
+      await container.remove(bundled.version)
+      const cleaned = container.snapshot()
+      if (cleaned.installed.some((entry) => entry.version === bundled.version)) {
+        throw new Error(`the old bundled version ${bundled.version} remained selectable after removal`)
+      }
+      if (cleaned.activeVersion !== version || cleaned.phase !== 'ready') {
+        throw new Error('removing the old bundled version disturbed the active Harness')
+      }
+    }
     result.ok = true
   } catch (error) {
     result.error = error instanceof Error ? error.message : String(error)
